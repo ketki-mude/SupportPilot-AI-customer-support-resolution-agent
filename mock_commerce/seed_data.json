@@ -1,0 +1,91 @@
+{
+  "_comment": "All dates are relative to service start (days_ago / in_days) so edge cases stay valid over time.",
+  "customers": [
+    {"id": "cus_001", "name": "Jordan Lee", "email": "jordan.lee@example.com", "phone": "+1-555-0101", "tier": "gold", "fraud_flag": false, "member_since_days_ago": 812},
+    {"id": "cus_002", "name": "Priya Raman", "email": "priya.raman@example.com", "phone": "+1-555-0102", "tier": "standard", "fraud_flag": false, "member_since_days_ago": 240},
+    {"id": "cus_003", "name": "Marcus Chen", "email": "marcus.chen@example.com", "phone": "+1-555-0103", "tier": "platinum", "fraud_flag": false, "member_since_days_ago": 1630},
+    {"id": "cus_004", "name": "Sofia Alvarez", "email": "sofia.alvarez@example.com", "phone": "+1-555-0104", "tier": "standard", "fraud_flag": false, "member_since_days_ago": 95},
+    {"id": "cus_005", "name": "Daniel Okafor", "email": "daniel.okafor@example.com", "phone": "+1-555-0105", "tier": "gold", "fraud_flag": false, "member_since_days_ago": 540},
+    {"id": "cus_006", "name": "Emma Johansson", "email": "emma.johansson@example.com", "phone": "+1-555-0106", "tier": "standard", "fraud_flag": false, "member_since_days_ago": 61},
+    {"id": "cus_007", "name": "Liam Novak", "email": "liam.novak@example.com", "phone": "+1-555-0107", "tier": "standard", "fraud_flag": true, "member_since_days_ago": 34},
+    {"id": "cus_008", "name": "Aisha Khan", "email": "aisha.khan@example.com", "phone": "+1-555-0108", "tier": "gold", "fraud_flag": false, "member_since_days_ago": 702},
+    {"id": "cus_009", "name": "Noah Williams", "email": "noah.williams@example.com", "phone": "+1-555-0109", "tier": "standard", "fraud_flag": false, "member_since_days_ago": 410},
+    {"id": "cus_010", "name": "Mei Tanaka", "email": "mei.tanaka@example.com", "phone": "+1-555-0110", "tier": "platinum", "fraud_flag": false, "member_since_days_ago": 1210}
+  ],
+  "orders": [
+    {"order_id": "ORD-10001", "customer_id": "cus_001", "status": "delivered", "placed_days_ago": 9, "shipped_days_ago": 7, "delivered_days_ago": 4, "payment_method_last4": "4242", "tracking_number": "1Z999AA10001",
+     "items": [{"sku": "SKU-HP-450", "name": "Aurora ANC wireless headphones", "quantity": 1, "unit_price": "79.99"}]},
+    {"order_id": "ORD-10002", "customer_id": "cus_001", "status": "delivered", "placed_days_ago": 11, "shipped_days_ago": 9, "delivered_days_ago": 6, "payment_method_last4": "4242", "tracking_number": "1Z999AA10002",
+     "items": [{"sku": "SKU-PC-110", "name": "Slim phone case", "quantity": 1, "unit_price": "19.99"}, {"sku": "SKU-SP-020", "name": "Tempered glass screen protector", "quantity": 1, "unit_price": "9.99"}]},
+    {"order_id": "ORD-10003", "customer_id": "cus_001", "status": "in_transit", "placed_days_ago": 4, "shipped_days_ago": 2, "estimated_delivery_in_days": 3, "payment_method_last4": "4242", "tracking_number": "1Z999AA10003",
+     "items": [{"sku": "SKU-SW-300", "name": "Pulse smart watch", "quantity": 1, "unit_price": "249.00"}]},
+    {"order_id": "ORD-10004", "customer_id": "cus_001", "status": "delivered", "placed_days_ago": 52, "shipped_days_ago": 49, "delivered_days_ago": 45, "payment_method_last4": "8811", "tracking_number": "1Z999AA10004",
+     "items": [{"sku": "SKU-BS-210", "name": "Echo mini Bluetooth speaker", "quantity": 1, "unit_price": "59.00"}]},
+    {"order_id": "ORD-10005", "customer_id": "cus_001", "status": "delivered", "placed_days_ago": 15, "shipped_days_ago": 13, "delivered_days_ago": 10, "payment_method_last4": "4242", "tracking_number": "1Z999AA10005",
+     "items": [{"sku": "SKU-CH-065", "name": "65W USB-C charger", "quantity": 1, "unit_price": "34.50"}]},
+    {"order_id": "ORD-10006", "customer_id": "cus_001", "status": "delivered", "placed_days_ago": 12, "shipped_days_ago": 10, "delivered_days_ago": 7, "payment_method_last4": "8811", "tracking_number": "1Z999AA10006",
+     "items": [{"sku": "SKU-LT-140", "name": "Nimbus 14-inch laptop", "quantity": 1, "unit_price": "1299.00"}]},
+    {"order_id": "ORD-10007", "customer_id": "cus_001", "status": "processing", "placed_days_ago": 0, "payment_method_last4": "4242",
+     "items": [{"sku": "SKU-CG-080", "name": "Burr coffee grinder", "quantity": 1, "unit_price": "45.00"}]},
+    {"order_id": "ORD-10008", "customer_id": "cus_001", "status": "delivered", "placed_days_ago": 35, "shipped_days_ago": 33, "delivered_days_ago": 29, "payment_method_last4": "4242", "tracking_number": "1Z999AA10008",
+     "items": [{"sku": "SKU-DL-040", "name": "Arc LED desk lamp", "quantity": 1, "unit_price": "39.99"}]},
+
+    {"order_id": "ORD-10009", "customer_id": "cus_002", "status": "delivered", "placed_days_ago": 13, "shipped_days_ago": 11, "delivered_days_ago": 8, "payment_method_last4": "1881", "tracking_number": "1Z999AA10009",
+     "items": [{"sku": "SKU-RS-900", "name": "Stride trail running shoes", "quantity": 1, "unit_price": "89.95"}]},
+    {"order_id": "ORD-10010", "customer_id": "cus_002", "status": "delivered", "placed_days_ago": 20, "shipped_days_ago": 18, "delivered_days_ago": 15, "payment_method_last4": "1881", "tracking_number": "1Z999AA10010",
+     "items": [{"sku": "SKU-YM-050", "name": "Grip yoga mat", "quantity": 1, "unit_price": "28.00"}]},
+    {"order_id": "ORD-10011", "customer_id": "cus_002", "status": "in_transit", "placed_days_ago": 3, "shipped_days_ago": 1, "estimated_delivery_in_days": 4, "payment_method_last4": "1881", "tracking_number": "1Z999AA10011",
+     "items": [{"sku": "SKU-WB-075", "name": "Insulated water bottle", "quantity": 2, "unit_price": "18.50"}]},
+
+    {"order_id": "ORD-10012", "customer_id": "cus_003", "status": "delivered", "placed_days_ago": 10, "shipped_days_ago": 8, "delivered_days_ago": 5, "payment_method_last4": "3005", "tracking_number": "1Z999AA10012",
+     "items": [{"sku": "SKU-TV-650", "name": "Vista 65-inch OLED TV", "quantity": 1, "unit_price": "1799.00"}]},
+    {"order_id": "ORD-10013", "customer_id": "cus_003", "status": "delivered", "placed_days_ago": 10, "shipped_days_ago": 8, "delivered_days_ago": 5, "payment_method_last4": "3005", "tracking_number": "1Z999AA10013",
+     "items": [{"sku": "SKU-SB-310", "name": "Cinema soundbar", "quantity": 1, "unit_price": "349.00"}]},
+    {"order_id": "ORD-10014", "customer_id": "cus_003", "status": "delivered", "placed_days_ago": 25, "shipped_days_ago": 23, "delivered_days_ago": 20, "payment_method_last4": "3005", "tracking_number": "1Z999AA10014",
+     "items": [{"sku": "SKU-HC-002", "name": "HDMI 2.1 cable, 2 m", "quantity": 3, "unit_price": "12.99"}]},
+
+    {"order_id": "ORD-10015", "customer_id": "cus_004", "status": "in_transit", "placed_days_ago": 2, "shipped_days_ago": 1, "estimated_delivery_in_days": 2, "payment_method_last4": "7720", "tracking_number": "1Z999AA10015",
+     "items": [{"sku": "SKU-AF-550", "name": "Crisp 5.5 L air fryer", "quantity": 1, "unit_price": "119.00"}]},
+    {"order_id": "ORD-10016", "customer_id": "cus_004", "status": "delivered", "placed_days_ago": 17, "shipped_days_ago": 15, "delivered_days_ago": 12, "payment_method_last4": "7720", "tracking_number": "1Z999AA10016",
+     "items": [{"sku": "SKU-KS-006", "name": "Six-piece kitchen knife set", "quantity": 1, "unit_price": "64.50"}]},
+    {"order_id": "ORD-10017", "customer_id": "cus_004", "status": "delivered", "placed_days_ago": 46, "shipped_days_ago": 44, "delivered_days_ago": 40, "payment_method_last4": "7720", "tracking_number": "1Z999AA10017",
+     "items": [{"sku": "SKU-CB-030", "name": "Walnut cutting board", "quantity": 1, "unit_price": "22.00"}]},
+
+    {"order_id": "ORD-10018", "customer_id": "cus_005", "status": "delivered", "placed_days_ago": 7, "shipped_days_ago": 5, "delivered_days_ago": 3, "payment_method_last4": "6104", "tracking_number": "1Z999AA10018",
+     "items": [{"sku": "SKU-KB-870", "name": "Tactile mechanical keyboard", "quantity": 1, "unit_price": "139.00"}]},
+    {"order_id": "ORD-10019", "customer_id": "cus_005", "status": "delivered", "placed_days_ago": 7, "shipped_days_ago": 5, "delivered_days_ago": 3, "payment_method_last4": "6104", "tracking_number": "1Z999AA10019",
+     "items": [{"sku": "SKU-MP-010", "name": "Extended mouse pad", "quantity": 1, "unit_price": "14.99"}]},
+    {"order_id": "ORD-10020", "customer_id": "cus_005", "status": "processing", "placed_days_ago": 1, "payment_method_last4": "6104",
+     "items": [{"sku": "SKU-MN-270", "name": "Clarity 27-inch monitor", "quantity": 1, "unit_price": "329.99"}]},
+
+    {"order_id": "ORD-10021", "customer_id": "cus_006", "status": "cancelled", "placed_days_ago": 14, "payment_method_last4": "2290",
+     "items": [{"sku": "SKU-WJ-400", "name": "Alpine winter jacket", "quantity": 1, "unit_price": "189.00"}]},
+    {"order_id": "ORD-10022", "customer_id": "cus_006", "status": "delivered", "placed_days_ago": 14, "shipped_days_ago": 12, "delivered_days_ago": 9, "payment_method_last4": "2290", "tracking_number": "1Z999AA10022",
+     "items": [{"sku": "SKU-WS-015", "name": "Merino wool scarf", "quantity": 1, "unit_price": "50.00"}]},
+
+    {"order_id": "ORD-10023", "customer_id": "cus_007", "status": "delivered", "placed_days_ago": 6, "shipped_days_ago": 4, "delivered_days_ago": 2, "payment_method_last4": "0057", "tracking_number": "1Z999AA10023",
+     "items": [{"sku": "SKU-EB-500", "name": "Pods Pro wireless earbuds", "quantity": 1, "unit_price": "129.00"}]},
+    {"order_id": "ORD-10024", "customer_id": "cus_007", "status": "delivered", "placed_days_ago": 6, "shipped_days_ago": 4, "delivered_days_ago": 2, "payment_method_last4": "0057", "tracking_number": "1Z999AA10024",
+     "items": [{"sku": "SKU-PB-100", "name": "10,000 mAh power bank", "quantity": 1, "unit_price": "49.99"}]},
+    {"order_id": "ORD-10025", "customer_id": "cus_007", "status": "delivered", "placed_days_ago": 22, "shipped_days_ago": 20, "delivered_days_ago": 16, "payment_method_last4": "0057", "tracking_number": "1Z999AA10025",
+     "items": [{"sku": "SKU-EB-500", "name": "Pods Pro wireless earbuds", "quantity": 1, "unit_price": "129.00"}]},
+
+    {"order_id": "ORD-10026", "customer_id": "cus_008", "status": "delivered", "placed_days_ago": 11, "shipped_days_ago": 9, "delivered_days_ago": 6, "payment_method_last4": "5150", "tracking_number": "1Z999AA10026",
+     "items": [{"sku": "SKU-EM-900", "name": "Barista espresso machine", "quantity": 1, "unit_price": "449.00"}]},
+    {"order_id": "ORD-10027", "customer_id": "cus_008", "status": "delivered", "placed_days_ago": 11, "shipped_days_ago": 9, "delivered_days_ago": 6, "payment_method_last4": "5150", "tracking_number": "1Z999AA10027",
+     "items": [{"sku": "SKU-MF-120", "name": "Handheld milk frother", "quantity": 1, "unit_price": "29.99"}]},
+
+    {"order_id": "ORD-10028", "customer_id": "cus_009", "status": "delivered", "placed_days_ago": 66, "shipped_days_ago": 64, "delivered_days_ago": 60, "payment_method_last4": "9032", "tracking_number": "1Z999AA10028",
+     "items": [{"sku": "SKU-GH-700", "name": "Surround gaming headset", "quantity": 1, "unit_price": "99.99"}]},
+    {"order_id": "ORD-10029", "customer_id": "cus_009", "status": "in_transit", "placed_days_ago": 5, "shipped_days_ago": 3, "estimated_delivery_in_days": 1, "payment_method_last4": "9032", "tracking_number": "1Z999AA10029",
+     "items": [{"sku": "SKU-GC-060", "name": "Wireless game controller", "quantity": 1, "unit_price": "59.99"}]},
+
+    {"order_id": "ORD-10030", "customer_id": "cus_010", "status": "delivered", "placed_days_ago": 5, "shipped_days_ago": 3, "delivered_days_ago": 1, "payment_method_last4": "4417", "tracking_number": "1Z999AA10030",
+     "items": [{"sku": "SKU-RV-800", "name": "Orbit robot vacuum", "quantity": 1, "unit_price": "549.00"}]}
+  ],
+  "prior_refunds": [
+    {"refund_id": "re_seed_10005", "order_id": "ORD-10005", "amount": "34.50", "reason": "Charger stopped working after two days", "days_ago": 8},
+    {"refund_id": "re_seed_10025", "order_id": "ORD-10025", "amount": "129.00", "reason": "Item reported not received", "days_ago": 10},
+    {"refund_id": "re_seed_10026", "order_id": "ORD-10026", "amount": "50.00", "reason": "Partial refund for a dented side panel", "days_ago": 4}
+  ]
+}

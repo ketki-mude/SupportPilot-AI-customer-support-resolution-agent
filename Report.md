@@ -117,15 +117,18 @@ Passwords come from env vars in the seed script. Never hardcode them in source.
 ## Mock commerce API (port 8001)
 - `GET /customers/{id}`
 - `GET /customers/{id}/orders`
-- `GET /orders/{order_id}` (items, price, status, delivered_at, payment_method_last4)
+- `GET /orders/{order_id}` (items, price, status, payment_status, delivered_at, estimated_delivery_at, payment_method_last4, remedy)
 - `POST /refunds` (requires `Idempotency-Key` header; same key returns the original result; body: order_id, amount, reason)
 - `POST /replacements` (same idempotency rule)
+- `POST /orders/{order_id}/cancel` (same idempotency rule; only when status is `processing`, otherwise 409). Cancels the order and, in the same call, refunds a captured payment or voids an authorized one.
 - `GET /health`
-It must support a configurable failure rate via env `MOCK_FAILURE_RATE` (random 503s and slow responses) so retry and error handling can be demonstrated and tested. Seed 30 realistic orders across 10 customers, including edge cases: delivered 45 days ago, already refunded, wrong owner, high value, in transit.
+Order statuses: `processing`, `shipped`, `in_transit`, `delivered`, `cancelled`. Payment status: `authorized`, `captured`, `voided`.
+One remedy per order: an order records at most one remedy (`refund` or `replacement`); a second remedy request returns 409. A replay with the same Idempotency-Key still returns the original result.
+It must support a configurable failure rate via env `MOCK_FAILURE_RATE` (random 503s and slow responses) so retry and error handling can be demonstrated and tested. Seed 30 realistic orders across 10 customers, including edge cases: delivered 45 days ago, already refunded, already replaced, wrong owner, high value, in transit, in transit past its estimated delivery date, shipped, several processing (captured and authorized), and already cancelled.
 
 ## Database models
 - `users`: id, email, password_hash, role, customer_id (nullable), created_at
-- `tickets`: id, public_id (TCK-####), customer_id, order_id, category, status (open, awaiting_approval, resolved, escalated, rejected), priority, summary, created_at, updated_at
+- `tickets`: id, public_id (TCK-####), customer_id, order_id, category (refund, replacement, missing_order, cancellation, billing, other), status (open, awaiting_approval, resolved, escalated, rejected), priority, summary, created_at, updated_at
 - `messages`: id, ticket_id, sender (customer, agent, supervisor, system), content, created_at
 - `approvals`: id, ticket_id, proposed_action (jsonb), status (pending, approved, rejected), decided_by, note, decided_at, created_at
 - `audit_logs`: id, ticket_id, actor (user id or "agent"), action, tool_name, input (jsonb), output (jsonb), status, created_at. Append-only: no update or delete routes or ORM methods.
@@ -133,27 +136,34 @@ It must support a configurable failure rate via env `MOCK_FAILURE_RATE` (random 
 - `policy_chunks`: id, source, section, content, embedding (vector 384), created_at
 
 ## Business rules (deterministic code in `services/policy_engine.py`, never decided by the LLM)
-- Refund window: 30 days from delivery.
-- Customer must own the order. A mismatch means deny and write an audit entry.
-- One refund per order. Already refunded means deny.
-- Auto-approve: refunds up to $50.
-- Supervisor approval required: refunds over $50 up to $500.
-- Escalate to a human with no automated action: refunds over $500, order status in transit, suspected fraud flag, intent unknown, or LLM confidence below 0.6.
-- Order not yet delivered: offer status information, never refund.
-- The thresholds live in config, not in prompts.
+- Every action: the customer must own the order, otherwise deny and write an audit entry. Escalate on a suspected fraud flag, unknown intent, or LLM confidence below 0.6.
+- Money amounts come from the order data, never from the LLM. The LLM picks which items a request is about; the engine computes the amount and denies any proposal whose amount does not match.
+- Refunds and replacements follow the same rules (a replacement is valued at the price of the replaced items):
+  - Only delivered orders, within 30 days of delivery (day 30 allowed, day 31 not, counted in UTC calendar days).
+  - Not delivered: share status only. Exception: an order still in transit after its estimated delivery date escalates to a human (likely lost).
+  - One remedy per order. If a refund or replacement already exists, deny.
+  - Up to $50: auto-approve. Over $50 up to $500: supervisor approval. Over $500: escalate to a human.
+- Cancellations:
+  - Status `processing`: auto-approve at any amount. Call the cancel endpoint, which refunds a captured payment in the same call.
+  - Status `shipped` or `in_transit`: escalate to a human.
+  - Status `delivered`: cannot cancel. Explain and offer the refund path.
+  - Status `cancelled`: share the status, take no action.
+  - Config flag `CANCEL_USE_REFUND_LIMITS` (default false). When true, unshipped cancellations use the same $50 and $500 limits as refunds.
+- All thresholds and the window live in config, not in prompts.
 
 ## Agent workflow (LangGraph)
 State (Pydantic): ticket_id, customer_id, messages, intent, order, policy_snippets, proposal, decision, approval, result, errors.
 Nodes and edges:
-1. `intake`: classify intent (refund, missing_order, cancellation, billing, other) with structured output, create or load the ticket, extract the order id.
+1. `intake`: classify intent (refund, replacement, missing_order, cancellation, billing, other) with structured output, create or load the ticket, extract the order id. If the customer gives no order number, the `list_my_orders` tool (customer id from the authenticated token, never from the model; audited) lists their orders and the model proposes which one matches; code keeps only ids from that list. Several matches: ask, describing them by item and date. None: ask for more detail. At most 5 clarification turns, then escalate.
 2. `customer_data`: tools get_customer and get_order through the mock API; verify ownership.
 3. `policy_rag`: retrieve the top 4 policy chunks with section citations.
-4. `resolution`: LLM returns a structured `Proposal` (action: refund, replacement, info, escalate; amount; reason; confidence; citations).
-5. `policy_gate`: call `policy_engine.evaluate(proposal, order)`; returns decision auto_approve, needs_approval, deny, or escalate. This is plain Python.
+4. `resolution`: LLM returns a structured `Proposal` (action: refund, replacement, cancel, info, escalate; items; amount; reason; confidence; citations).
+5. `policy_gate`: call `policy_engine.evaluate(proposal, order)`; returns decision auto_approve, needs_approval, deny, or escalate. This is plain Python. The engine itself writes nothing, so this node must write an audit entry for every decision (rule, reason, amount), including ownership denials, so an attempt on another customer's order is always recorded.
 6. `approval_gate`: only when needs_approval. Create an approval row, set ticket status to awaiting_approval, then call LangGraph `interrupt()`. The run resumes with `Command(resume=...)` when a supervisor decides.
-7. `executor`: only runs actions that are auto-approved or have an approved approval row. Calls the refund tool with idempotency key `refund-{ticket_id}`. Retries transient errors with tenacity (3 attempts, exponential backoff).
+7. `executor`: only runs actions that are auto-approved or have an approved approval row. Calls the refund, replacement, or cancel tool with idempotency key `refund-{ticket_id}`, `replacement-{ticket_id}`, or `cancel-{ticket_id}`. Retries transient errors with tenacity (3 attempts, exponential backoff).
 8. `notifier`: update the ticket, write the customer message, write the audit log.
 9. `escalation`: set status escalated, tell the customer a human will follow up, notify supervisors.
+Follow-up customer messages: open ticket, continue the conversation; awaiting approval, a fixed templated reply with no model call and no graph run (the message is saved for the supervisor); resolved, rejected, or escalated, save the message, do not reopen, send one templated reply, and set the ticket's `customer_replied` flag (exposed in the ticket API).
 Any unrecoverable tool error routes to `escalation`. Persist state with the Postgres checkpointer so a paused run survives a restart. The `thread_id` is the ticket id.
 
 ## Guardrails
@@ -161,6 +171,7 @@ Any unrecoverable tool error routes to `escalation`. Persist state with the Post
 - Redact emails, phone numbers, and card numbers before sending text to the LLM or logs.
 - The executor refuses anything without a recorded approval or an auto_approve decision, even if the LLM asks.
 - Validate every tool argument with Pydantic.
+- Audit every attempted tool call, not only executed ones (Phase 5): when argument validation fails, write an audit entry with status `rejected_invalid`, the tool name, the validation error, and redacted arguments. Test that a malformed call is blocked and logged.
 - Rate limit the chat endpoint per user.
 
 ## Backend API
@@ -202,6 +213,10 @@ Handle loading, empty, and error states on every page.
 ## Evaluation plan
 `evals/dataset/cases.jsonl` holds 80 cases. Each has: id, customer_message, fixture (order and customer data), expected_intent, expected_action, expected_requires_approval, must_not (for example "issue refund"). Include cases for: valid refunds under and over $50, outside the window, wrong owner, already refunded, in transit, prompt injection attempts, vague messages, and tool failures.
 Metrics: correct resolution rate, policy compliance rate, unauthorized-action rate (target exactly 0), tool-call success rate, average latency, average cost per ticket. Write results to `evals/reports/` and `docs/eval-report.md`. Never fabricate numbers; the README must only quote results from real runs.
+
+## Testing notes
+- Backend tests may run the mock shop in-process (mounted read-only by `docker-compose.test.yml`, used only by `make test`) to force failures deterministically. The running backend and any production image never include mock shop code.
+- End-to-end tests (Phase 4 Playwright, Phase 6 eval smoke run) call the running mock service over HTTP, so the real network path is covered.
 
 ## Definition of done for the whole project
 - `docker compose up` starts everything and the seeded demo works end to end.

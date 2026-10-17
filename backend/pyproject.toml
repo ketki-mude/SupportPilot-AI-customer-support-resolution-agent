@@ -20,11 +20,21 @@ dependencies = [
     "structlog>=24.4",
     "bcrypt>=4.2",
     "pyjwt>=2.10",
+    "httpx>=0.28",
+    "tenacity>=9.0",
+    "langchain-core>=1.0",
+    "fastembed>=0.7",
+    "langgraph>=1.2",
+    "langgraph-checkpoint-postgres>=3.0",
+    "psycopg[binary]>=3.2",
+    "psycopg-pool>=3.2",
+    "langchain-google-genai>=4.0",
+    "langchain-anthropic>=1.0",
+    "langchain-openai>=1.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "httpx>=0.28",
     "pytest>=8.3",
     "pytest-asyncio>=0.25",
     "ruff>=0.8",
@@ -53,7 +63,7 @@ strict = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["pgvector.*"]
+module = ["pgvector.*", "fastembed.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

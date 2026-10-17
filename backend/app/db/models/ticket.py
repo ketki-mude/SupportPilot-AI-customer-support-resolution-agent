@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, Sequence, String, Text, func, text
+from sqlalchemy import DateTime, Sequence, String, Text, false, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.models.base import Base, CreatedAtMixin, UUIDPrimaryKeyMixin, str_enum
@@ -18,7 +18,10 @@ class TicketStatus(StrEnum):
 
 
 class TicketCategory(StrEnum):
+    """The customer's intent, as classified by the agent. OTHER means unknown."""
+
     REFUND = "refund"
+    REPLACEMENT = "replacement"
     MISSING_ORDER = "missing_order"
     CANCELLATION = "cancellation"
     BILLING = "billing"
@@ -62,6 +65,10 @@ class Ticket(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         server_default=TicketPriority.NORMAL.value,
     )
     summary: Mapped[str | None] = mapped_column(Text)
+    # Set when the customer writes on a closed ticket, so staff can see it needs a look.
+    customer_replied: Mapped[bool] = mapped_column(default=False, server_default=false())
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True),
+        server_default=func.clock_timestamp(),
+        onupdate=func.clock_timestamp(),
     )

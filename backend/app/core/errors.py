@@ -49,6 +49,13 @@ class NotFoundError(AppError):
     code = "not_found"
 
 
+class ServiceUnavailableError(AppError):
+    """A dependency the request needs is not running."""
+
+    status_code = HTTPStatus.SERVICE_UNAVAILABLE
+    code = "service_unavailable"
+
+
 class ConflictError(AppError):
     """The request conflicts with the current state of the resource."""
 

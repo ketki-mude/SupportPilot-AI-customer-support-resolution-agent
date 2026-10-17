@@ -1,0 +1,6 @@
+# Test-only additions, used by `make test`. The running backend never sees the mock shop's code.
+services:
+  backend:
+    volumes:
+      # Read-only copy of the mock shop so backend tests can run it in-process and force failures.
+      - ./mock_commerce:/mock_commerce:ro

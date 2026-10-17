@@ -69,10 +69,10 @@ async def test_refund_requires_idempotency_key(client: AsyncClient) -> None:
 
 
 async def test_refund_cannot_exceed_refundable_balance(client: AsyncClient) -> None:
-    # ORD-10026 is 449.00 with 50.00 already refunded.
+    # ORD-10002 totals 29.98.
     response = await client.post(
         "/refunds",
-        json={"order_id": "ORD-10026", "amount": "400.00", "reason": "Broken"},
+        json={"order_id": "ORD-10002", "amount": "100.00", "reason": "Broken"},
         headers={"Idempotency-Key": "k3"},
     )
     assert response.status_code == 422
@@ -90,7 +90,7 @@ async def test_cancelled_order_has_nothing_to_refund(client: AsyncClient) -> Non
 
 async def test_failed_refund_is_not_stored_against_the_key(client: AsyncClient) -> None:
     headers = {"Idempotency-Key": "k5"}
-    body = {"order_id": "ORD-10026", "amount": "400.00", "reason": "Broken"}
+    body = {"order_id": "ORD-10002", "amount": "100.00", "reason": "Broken"}
     assert (await client.post("/refunds", json=body, headers=headers)).status_code == 422
     assert (await client.post("/refunds", json=body, headers=headers)).status_code == 422
 
@@ -123,7 +123,7 @@ async def test_replacement_is_idempotent(client: AsyncClient, store: CommerceSto
     assert first.status_code == second.status_code == 201
     assert second.json() == first.json()
     assert first.json()["items"][0]["sku"] == "SKU-HP-450"
-    assert len(store.replacements) == 1
+    assert len(store.replacements) == 2  # one seeded plus this one
 
 
 async def test_refund_and_replacement_keys_are_separate(
@@ -131,10 +131,12 @@ async def test_refund_and_replacement_keys_are_separate(
 ) -> None:
     headers = {"Idempotency-Key": "shared"}
     refund = await client.post("/refunds", json=REFUND, headers=headers)
-    replacement = await client.post("/replacements", json=REPLACEMENT, headers=headers)
+    replacement = await client.post(
+        "/replacements", json=REPLACEMENT | {"order_id": "ORD-10002"}, headers=headers
+    )
     assert refund.status_code == replacement.status_code == 201
     assert len(store.refunds) == 4  # three seeded plus this one
-    assert len(store.replacements) == 1
+    assert len(store.replacements) == 2  # one seeded plus this one
 
 
 async def test_replacement_requires_delivered_order(client: AsyncClient) -> None:

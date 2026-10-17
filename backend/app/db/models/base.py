@@ -31,9 +31,12 @@ class UUIDPrimaryKeyMixin:
 
 
 class CreatedAtMixin:
-    """Server-side creation timestamp."""
+    """Server-side creation timestamp. clock_timestamp() keeps rows written in one transaction
+    in the order they were inserted, which now() (fixed at transaction start) would not."""
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.clock_timestamp()
+    )
 
 
 def str_enum(enum_cls: type[StrEnum], name: str) -> Enum:

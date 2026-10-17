@@ -3,12 +3,13 @@
 from collections.abc import Awaitable, Callable
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.runner import AgentRunner
 from app.core.config import Settings, get_settings
-from app.core.errors import ForbiddenError, UnauthorizedError
+from app.core.errors import ForbiddenError, ServiceUnavailableError, UnauthorizedError
 from app.core.security import Role, TokenError, decode_access_token
 from app.db.models import User
 from app.db.session import get_session
@@ -41,6 +42,22 @@ async def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def get_agent_runner(request: Request) -> AgentRunner:
+    """The agent runtime started by the app lifespan."""
+    runner: AgentRunner | None = getattr(request.app.state, "agent_runner", None)
+    if runner is None:
+        raise ServiceUnavailableError("The support agent is not running")
+    return runner
+
+
+AgentRunnerDep = Annotated[AgentRunner, Depends(get_agent_runner)]
+
+
+def visible_customer_id(user: User) -> str | None:
+    """The customer whose tickets this user may see, or None for staff who see all."""
+    return user.customer_id if user.role is Role.CUSTOMER else None
 
 
 def require_roles(*roles: Role) -> Callable[[User], Awaitable[User]]:

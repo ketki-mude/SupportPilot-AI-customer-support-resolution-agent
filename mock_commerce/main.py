@@ -1,8 +1,11 @@
-"""Acme mock commerce API: customers, orders, and idempotent refunds and replacements.
+"""Acme mock commerce API: customers, orders, and idempotent refunds, replacements, cancellations.
 
 State is held in memory and resets when the service restarts. Seed dates are relative to start
 time so edge cases (for example "delivered 45 days ago") stay valid. MOCK_FAILURE_RATE injects
 random 503s and slow responses so callers can exercise retries and timeouts.
+
+Each order takes at most one remedy (a refund or a replacement). Cancelling a processing order
+refunds a captured payment, or voids an authorized one, in the same call.
 """
 
 import asyncio
@@ -49,9 +52,21 @@ class MockSettings(BaseSettings):
 
 class OrderStatus(StrEnum):
     PROCESSING = "processing"
+    SHIPPED = "shipped"
     IN_TRANSIT = "in_transit"
     DELIVERED = "delivered"
     CANCELLED = "cancelled"
+
+
+class PaymentStatus(StrEnum):
+    AUTHORIZED = "authorized"
+    CAPTURED = "captured"
+    VOIDED = "voided"
+
+
+class Remedy(StrEnum):
+    REFUND = "refund"
+    REPLACEMENT = "replacement"
 
 
 class RefundStatus(StrEnum):
@@ -81,6 +96,7 @@ class Order(BaseModel):
     order_id: str
     customer_id: str
     status: OrderStatus
+    payment_status: PaymentStatus
     items: list[OrderItem]
     total: Money
     currency: Literal["USD"] = "USD"
@@ -88,9 +104,11 @@ class Order(BaseModel):
     shipped_at: datetime | None
     delivered_at: datetime | None
     estimated_delivery_at: datetime | None
+    cancelled_at: datetime | None = None
     tracking_number: str | None
     payment_method_last4: str
     refunded_amount: Money = Decimal("0.00")
+    remedy: Remedy | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -101,8 +119,8 @@ class Order(BaseModel):
         return RefundStatus.FULL if self.refunded_amount >= self.total else RefundStatus.PARTIAL
 
     def refundable_amount(self) -> Decimal:
-        """Money still available to refund. Cancelled orders were never charged."""
-        if self.status == OrderStatus.CANCELLED:
+        """Money still available to refund. Only a captured payment can be refunded."""
+        if self.payment_status != PaymentStatus.CAPTURED:
             return Decimal("0.00")
         return self.total - self.refunded_amount
 
@@ -139,6 +157,27 @@ class Replacement(BaseModel):
     reason: str
     status: Literal["created"] = "created"
     created_at: datetime
+
+
+class CancelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class CancelFingerprint(BaseModel):
+    """What makes two cancel requests "the same" for idempotency: the order and the reason."""
+
+    order_id: str
+    reason: str
+
+
+class Cancellation(BaseModel):
+    order_id: str
+    status: Literal["cancelled"] = "cancelled"
+    payment_action: Literal["refunded", "voided"]
+    refund: Refund | None
+    cancelled_at: datetime
 
 
 class MockError(Exception):
@@ -184,13 +223,31 @@ class CommerceStore:
         self.get_customer(customer_id)
         return [o for o in self.orders.values() if o.customer_id == customer_id]
 
-    def record_refund(self, refund: Refund) -> None:
+    def record_refund(self, refund: Refund, *, as_remedy: bool) -> None:
+        """Store a refund. Refunds that come from a cancellation are not a remedy."""
+        order = self.orders[refund.order_id]
         self.refunds[refund.refund_id] = refund
-        self.orders[refund.order_id].refunded_amount += refund.amount
+        order.refunded_amount += refund.amount
+        if as_remedy:
+            order.remedy = Remedy.REFUND
+
+    def record_replacement(self, replacement: Replacement) -> None:
+        self.replacements[replacement.replacement_id] = replacement
+        self.orders[replacement.order_id].remedy = Remedy.REPLACEMENT
+
+    @staticmethod
+    def _ensure_no_remedy(order: Order) -> None:
+        if order.remedy is not None:
+            raise MockError(
+                HTTPStatus.CONFLICT,
+                "remedy_already_applied",
+                f"Order {order.order_id} already has a {order.remedy.value}",
+            )
 
     def create_refund(self, request: RefundRequest) -> Refund:
-        """Refund part or all of an order, never more than was charged."""
+        """Refund part or all of an order once, never more than was charged."""
         order = self.get_order(request.order_id)
+        self._ensure_no_remedy(order)
         refundable = order.refundable_amount()
         if request.amount > refundable:
             raise MockError(
@@ -205,7 +262,7 @@ class CommerceStore:
             reason=request.reason,
             created_at=datetime.now(UTC),
         )
-        self.record_refund(refund)
+        self.record_refund(refund, as_remedy=True)
         return refund
 
     def create_replacement(self, request: ReplacementRequest) -> Replacement:
@@ -215,6 +272,7 @@ class CommerceStore:
             raise MockError(
                 HTTPStatus.CONFLICT, "order_not_delivered", "Only delivered orders can be replaced"
             )
+        self._ensure_no_remedy(order)
         items = order.items
         if request.skus is not None:
             unknown = set(request.skus) - {item.sku for item in order.items}
@@ -232,8 +290,39 @@ class CommerceStore:
             reason=request.reason,
             created_at=datetime.now(UTC),
         )
-        self.replacements[replacement.replacement_id] = replacement
+        self.record_replacement(replacement)
         return replacement
+
+    def cancel_order(self, order_id: str, reason: str) -> Cancellation:
+        """Cancel a processing order, refunding a captured payment or voiding an authorized one."""
+        order = self.get_order(order_id)
+        if order.status != OrderStatus.PROCESSING:
+            raise MockError(
+                HTTPStatus.CONFLICT,
+                "order_not_cancellable",
+                f"Only processing orders can be cancelled; this order is {order.status.value}",
+            )
+        now = datetime.now(UTC)
+        refund: Refund | None = None
+        if order.payment_status == PaymentStatus.CAPTURED:
+            refund = Refund(
+                refund_id=f"re_{secrets.token_hex(8)}",
+                order_id=order.order_id,
+                amount=order.refundable_amount(),
+                reason=f"Order cancelled: {reason}",
+                created_at=now,
+            )
+            self.record_refund(refund, as_remedy=False)
+        else:
+            order.payment_status = PaymentStatus.VOIDED
+        order.status = OrderStatus.CANCELLED
+        order.cancelled_at = now
+        return Cancellation(
+            order_id=order.order_id,
+            payment_action="refunded" if refund else "voided",
+            refund=refund,
+            cancelled_at=now,
+        )
 
 
 def _days_ago(now: datetime, days: int | None) -> datetime | None:
@@ -263,12 +352,14 @@ def load_store(path: Path, now: datetime) -> CommerceStore:
             order_id=raw["order_id"],
             customer_id=raw["customer_id"],
             status=raw["status"],
+            payment_status=raw.get("payment_status", PaymentStatus.CAPTURED),
             items=items,
             total=sum((item.unit_price * item.quantity for item in items), Decimal("0.00")),
             placed_at=now - timedelta(days=raw["placed_days_ago"]),
             shipped_at=_days_ago(now, raw.get("shipped_days_ago")),
             delivered_at=_days_ago(now, raw.get("delivered_days_ago")),
             estimated_delivery_at=None if eta_days is None else now + timedelta(days=eta_days),
+            cancelled_at=_days_ago(now, raw.get("cancelled_days_ago")),
             tracking_number=raw.get("tracking_number"),
             payment_method_last4=raw["payment_method_last4"],
         )
@@ -279,6 +370,17 @@ def load_store(path: Path, now: datetime) -> CommerceStore:
                 refund_id=raw["refund_id"],
                 order_id=raw["order_id"],
                 amount=Decimal(raw["amount"]),
+                reason=raw["reason"],
+                created_at=now - timedelta(days=raw["days_ago"]),
+            ),
+            as_remedy=True,
+        )
+    for raw in data["prior_replacements"]:
+        store.record_replacement(
+            Replacement(
+                replacement_id=raw["replacement_id"],
+                order_id=raw["order_id"],
+                items=orders[raw["order_id"]].items,
                 reason=raw["reason"],
                 created_at=now - timedelta(days=raw["days_ago"]),
             )
@@ -408,6 +510,20 @@ def create_app(settings: MockSettings | None = None, store: CommerceStore | None
             idempotency_key,
             body,
             lambda: commerce.create_replacement(body),
+        )
+
+    @app.post(
+        "/orders/{order_id}/cancel", status_code=HTTPStatus.CREATED, response_model=Cancellation
+    )
+    async def cancel_order(
+        order_id: str, body: CancelRequest, idempotency_key: IdempotencyKey = None
+    ) -> Response:
+        return await _run_idempotent(
+            commerce,
+            "cancellations",
+            idempotency_key,
+            CancelFingerprint(order_id=order_id, reason=body.reason),
+            lambda: commerce.cancel_order(order_id, body.reason),
         )
 
     return app

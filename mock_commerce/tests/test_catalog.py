@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from httpx import AsyncClient
 
-from main import CommerceStore, OrderStatus, RefundStatus
+from main import CommerceStore, OrderStatus, PaymentStatus, RefundStatus, Remedy
 from tests.conftest import NOW
 
 
@@ -84,6 +84,25 @@ def test_seed_covers_edge_cases(store: CommerceStore) -> None:
     assert orders["ORD-10003"].delivered_at is None
     assert orders["ORD-10009"].customer_id != "cus_001"  # wrong-owner claim target
     assert store.customers["cus_007"].fraud_flag is True
+    assert orders["ORD-10016"].remedy == Remedy.REPLACEMENT
+    assert orders["ORD-10005"].remedy == Remedy.REFUND
+    assert orders["ORD-10015"].status == OrderStatus.SHIPPED
+    assert orders["ORD-10021"].status == OrderStatus.CANCELLED
+    assert orders["ORD-10021"].payment_status == PaymentStatus.VOIDED
+    late = orders["ORD-10029"]
+    assert late.status == OrderStatus.IN_TRANSIT
+    assert late.estimated_delivery_at is not None
+    assert late.estimated_delivery_at < NOW
+
+
+def test_seed_has_processing_orders_with_both_payment_states(store: CommerceStore) -> None:
+    processing = [o for o in store.orders.values() if o.status == OrderStatus.PROCESSING]
+    assert len(processing) >= 3
+    assert {o.payment_status for o in processing} == {
+        PaymentStatus.CAPTURED,
+        PaymentStatus.AUTHORIZED,
+    }
+    assert any(o.customer_id == "cus_001" for o in processing)  # demo customer can cancel
 
 
 def test_seed_orders_have_consistent_dates(store: CommerceStore) -> None:
@@ -94,6 +113,10 @@ def test_seed_orders_have_consistent_dates(store: CommerceStore) -> None:
             assert order.placed_at <= order.shipped_at <= order.delivered_at
         else:
             assert order.delivered_at is None
-        if order.status == OrderStatus.IN_TRANSIT:
+        if order.status in {OrderStatus.SHIPPED, OrderStatus.IN_TRANSIT}:
+            assert order.shipped_at is not None
             assert order.estimated_delivery_at is not None
-            assert order.estimated_delivery_at > NOW
+        if order.status == OrderStatus.PROCESSING:
+            assert order.shipped_at is None
+        if order.status == OrderStatus.CANCELLED:
+            assert order.cancelled_at is not None

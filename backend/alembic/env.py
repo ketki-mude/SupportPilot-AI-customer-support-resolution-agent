@@ -18,6 +18,13 @@ if config.config_file_name is not None and "database_url" not in config.attribut
 
 target_metadata = Base.metadata
 
+# LangGraph's checkpointer creates and migrates its own tables; Alembic leaves them alone.
+_EXTERNAL_TABLE_PREFIX = "checkpoint"
+
+
+def _include_name(name: str | None, type_: str, _: object) -> bool:
+    return not (type_ == "table" and name is not None and name.startswith(_EXTERNAL_TABLE_PREFIX))
+
 
 def _database_url() -> str:
     url: str | None = config.attributes.get("database_url")
@@ -37,7 +44,12 @@ def run_migrations_offline() -> None:
 
 
 def _run_sync_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+        include_name=_include_name,
+    )
     with context.begin_transaction():
         context.run_migrations()
 

@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Design tokens. Neutral gray surfaces, one accent blue, hairline borders.
+ * Values are HSL components so Tailwind can apply opacity (bg-accent/10).
+ * A hairline is one device pixel: 0.5px on high-density screens, 1px elsewhere, where a
+ * half-pixel line would render faintly or not at all.
+ */
+:root {
+  --hairline: 1px;
+  --background: 220 14% 97%;
+  --surface: 0 0% 100%;
+  --muted: 220 14% 94%;
+  --border: 220 12% 76%;
+  /* Form fields need a clearly visible edge (about 3:1 against the surface). */
+  --input: 220 10% 58%;
+  --foreground: 222 22% 12%;
+  --subtle: 220 9% 40%;
+  --accent: 216 85% 48%;
+  --accent-foreground: 0 0% 100%;
+  --accent-soft: 216 90% 95%;
+  --success: 150 62% 28%;
+  --success-soft: 145 50% 92%;
+  --warning: 30 92% 30%;
+  --warning-soft: 42 95% 90%;
+  --danger: 0 68% 42%;
+  --danger-soft: 0 85% 95%;
+  --ring: 216 85% 48%;
+  --radius-control: 8px;
+  --radius-card: 12px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: 222 16% 9%;
+    --surface: 222 14% 12%;
+    --muted: 222 12% 17%;
+    --border: 222 10% 38%;
+    --input: 222 10% 52%;
+    --foreground: 220 15% 93%;
+    --subtle: 220 9% 66%;
+    --accent: 214 90% 62%;
+    --accent-foreground: 222 30% 10%;
+    --accent-soft: 214 45% 22%;
+    --success: 145 50% 62%;
+    --success-soft: 150 35% 17%;
+    --warning: 40 90% 64%;
+    --warning-soft: 35 45% 18%;
+    --danger: 0 80% 70%;
+    --danger-soft: 0 40% 20%;
+    --ring: 214 90% 62%;
+    color-scheme: dark;
+  }
+}
+
+@media (min-resolution: 2dppx) {
+  :root {
+    --hairline: 0.5px;
+  }
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background font-sans text-sm text-foreground antialiased;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-1 ring-offset-background;
+  }
+}

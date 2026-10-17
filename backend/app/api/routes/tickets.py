@@ -5,11 +5,12 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.tools.commerce import CommerceClient, CommerceError
 from app.api.deps import AgentRunnerDep, CurrentUser, SessionDep, visible_customer_id
-from app.db.models import Approval, AuditLog, Ticket, TicketStatus
+from app.db.models import AgentRun, Approval, AuditLog, Ticket, TicketStatus
 from app.schemas.approval import ApprovalRead
 from app.schemas.common import Page
 from app.schemas.errors import ErrorResponse
@@ -22,6 +23,7 @@ from app.schemas.ticket import (
     TicketDetail,
     TicketListItem,
     TicketRead,
+    TicketUsage,
 )
 from app.services import ticket_service
 
@@ -94,11 +96,40 @@ async def get_ticket(
     )
     detail.approvals = [ApprovalRead.model_validate(a) for a in approvals]
     detail.trace = [AuditEntryRead.model_validate(e) for e in trace]
+    detail.usage = await _usage(session, ticket.id)
     try:
         detail.customer_context = await _customer_context(runner.commerce, ticket)
     except CommerceError as exc:
         detail.customer_context_error = str(exc)
     return detail
+
+
+async def _usage(session: AsyncSession, ticket_id: uuid.UUID) -> TicketUsage:
+    runs, input_tokens, output_tokens, cost, latency = (
+        await session.execute(
+            select(
+                func.count(),
+                func.coalesce(func.sum(AgentRun.input_tokens), 0),
+                func.coalesce(func.sum(AgentRun.output_tokens), 0),
+                func.coalesce(func.sum(AgentRun.cost_usd), 0),
+                func.coalesce(func.sum(AgentRun.latency_ms), 0),
+            ).where(AgentRun.ticket_id == ticket_id)
+        )
+    ).one()
+    last = await session.scalar(
+        select(AgentRun.status)
+        .where(AgentRun.ticket_id == ticket_id)
+        .order_by(AgentRun.created_at.desc())
+        .limit(1)
+    )
+    return TicketUsage(
+        runs=runs,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_usd=cost,
+        latency_ms=latency,
+        last_run_status=last.value if last else None,
+    )
 
 
 async def _customer_context(commerce: CommerceClient, ticket: Ticket) -> CustomerContext:

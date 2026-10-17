@@ -1,5 +1,5 @@
 import { ArrowLeft } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { AgentTrace } from "@/components/AgentTrace";
@@ -95,6 +95,8 @@ function TicketWorkspace({ ticketId }: { ticketId: string }) {
   const decision = useDecision(ticketId);
   const [result, setResult] = useState<DecisionResult | null>(null);
   const [decidedId, setDecidedId] = useState<string | null>(null);
+  // A fast double click fires twice before React re-renders; only the first one counts.
+  const submitting = useRef(false);
 
   useEffect(() => {
     if (result?.kind !== "error") return;
@@ -125,7 +127,8 @@ function TicketWorkspace({ ticketId }: { ticketId: string }) {
   const canDecide = Boolean(user && DECIDER_ROLES.includes(user.role));
 
   const onDecide = (choice: "approve" | "reject", note: string) => {
-    if (!approval) return;
+    if (!approval || submitting.current) return;
+    submitting.current = true;
     setDecidedId(approval.id);
     setResult(null);
     decision.mutate(
@@ -133,6 +136,9 @@ function TicketWorkspace({ ticketId }: { ticketId: string }) {
       {
         onSuccess: (decided) => setResult({ kind: decided.status === "approved" ? "approved" : "rejected" }),
         onError: (error) => setResult({ kind: "error", message: error.message }),
+        onSettled: () => {
+          submitting.current = false;
+        },
       },
     );
   };
@@ -144,7 +150,7 @@ function TicketWorkspace({ ticketId }: { ticketId: string }) {
           <Link to="/console" className="flex items-center gap-1 text-xs text-subtle md:hidden">
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> All tickets
           </Link>
-          <AiSummary ticket={data.ticket} />
+          <AiSummary ticket={data.ticket} usage={data.usage} />
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           <div className="mx-auto flex max-w-2xl flex-col gap-4">

@@ -19,7 +19,7 @@ def get_engine() -> AsyncEngine:
     return create_async_engine(
         get_settings().database_url,
         pool_pre_ping=True,
-        connect_args={"timeout": 5},
+        connect_args={"timeout": 5, "command_timeout": get_settings().db_command_timeout_seconds},
     )
 
 

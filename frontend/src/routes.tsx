@@ -4,6 +4,7 @@ import { STAFF_ROLES, homePath, RequireRole, useAuth } from "@/lib/auth";
 import AuditLog from "@/pages/AuditLog";
 import Chat from "@/pages/Chat";
 import Console from "@/pages/Console";
+import Evals from "@/pages/Evals";
 import Login from "@/pages/Login";
 
 function Home() {
@@ -37,6 +38,14 @@ export function AppRoutes() {
         element={
           <RequireRole roles={STAFF_ROLES}>
             <AuditLog />
+          </RequireRole>
+        }
+      />
+      <Route
+        path="/evals"
+        element={
+          <RequireRole roles={["admin"]}>
+            <Evals />
           </RequireRole>
         }
       />

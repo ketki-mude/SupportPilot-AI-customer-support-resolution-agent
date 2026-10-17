@@ -1,0 +1,86 @@
+# Lint, type checks, every test suite, and a 10-case evaluation smoke run.
+# Nothing here calls a real model: no API key is configured, and the evaluation uses the
+# offline keyword stand-in. The full live evaluation is the manual `make eval`.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  COMPOSE_PROGRESS: plain
+
+jobs:
+  backend:
+    name: Backend and mock shop
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create a CI .env with throwaway secrets
+        run: .github/scripts/ci-env.sh
+      - name: Build images
+        run: docker compose build backend mock_commerce mock_commerce_eval
+      - name: Lint and type check
+        run: make lint-backend
+      - name: Backend tests
+        run: make test-backend
+      - name: Mock shop tests
+        run: make test-mock
+      - name: Service logs
+        if: failure()
+        run: docker compose logs --no-color --tail 200
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Type check
+        run: npm run typecheck
+      - name: Tests
+        run: npm test
+      - name: Production build
+        run: npm run build
+
+  eval-smoke:
+    name: Evaluation smoke (10 cases, no model calls)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create a CI .env with throwaway secrets
+        run: .github/scripts/ci-env.sh
+      - name: Build images
+        run: docker compose build backend mock_commerce mock_commerce_eval
+      - name: Run the smoke set
+        # Fails unless all ten cases resolve as expected with zero unauthorized actions.
+        run: make eval-smoke
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-smoke-report
+          path: evals/reports/*-mock.json
+          if-no-files-found: ignore
+      - name: Service logs
+        if: failure()
+        run: docker compose logs --no-color --tail 200

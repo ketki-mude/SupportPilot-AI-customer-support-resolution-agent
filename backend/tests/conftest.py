@@ -31,18 +31,20 @@ from sqlalchemy.pool import NullPool
 
 from app.agents.checkpoint import open_checkpointer
 from app.agents.graph import build_graph
+from app.agents.llm import StructuredGenerator
 from app.agents.runner import AgentRunner
 from app.agents.runtime import EventBus
 from app.agents.tools.commerce import CommerceClient
+from app.api.deps import get_agent_runner
 from app.core.config import Settings, get_settings
-from app.core.security import Role, hash_password
+from app.core.security import Role, create_access_token, hash_password
 from app.db.models import User
 from app.db.session import get_session
 from app.main import create_app
 from app.rag.embeddings import get_embeddings
 from app.rag.ingest import ingest_policies
 from app.services.audit_service import AuditService
-from tests.agent_support import ScriptedLLM
+from tests.agent_support import PEOPLE, Api, ScriptedLLM
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 MOCK_COMMERCE_MAIN = BACKEND_DIR.parent / "mock_commerce" / "main.py"
@@ -275,14 +277,16 @@ def make_agent(
         *,
         saver: AsyncPostgresSaver | None = None,
         settings: Settings | None = None,
+        llm: StructuredGenerator | None = None,
+        commerce: CommerceClient | None = None,
         **faults: Any,
     ) -> AgentRunner:
         return AgentRunner(
             graph=build_graph().compile(checkpointer=saver or checkpointer),
             session_factory=live_sessions,
-            commerce=make_commerce(**faults),
+            commerce=commerce or make_commerce(**faults),
             audit=AuditService(live_sessions),
-            llm=scripted_llm,
+            llm=llm or scripted_llm,
             embeddings=embeddings,
             settings=settings or get_settings(),
             events=EventBus(),
@@ -294,3 +298,56 @@ def make_agent(
 @pytest.fixture
 def agent(make_agent: Callable[..., AgentRunner]) -> AgentRunner:
     return make_agent()
+
+
+@pytest.fixture
+async def api(
+    live_sessions: async_sessionmaker[AsyncSession], agent: AgentRunner
+) -> AsyncIterator[Api]:
+    """The real app with real commits, the test agent, and a signed-in user for each role."""
+    app = create_app()
+
+    async def session_override() -> AsyncIterator[AsyncSession]:
+        async with live_sessions() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = session_override
+    app.dependency_overrides[get_agent_runner] = lambda: agent
+
+    tokens = {}
+    async with live_sessions() as session:
+        for who, (role, customer_id) in PEOPLE.items():
+            user = User(
+                email=f"{who}@acme.com",
+                password_hash=hash_password(TEST_PASSWORD, rounds=4),
+                role=role,
+                customer_id=customer_id,
+            )
+            session.add(user)
+            await session.flush()
+            tokens[who] = create_access_token(user.id, role, get_settings())[0]
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield Api(app, client, tokens)
+
+
+@pytest.fixture
+def eval_settings(database_url: str) -> Settings:
+    url = make_url(database_url)
+    eval_url = url.set(database=f"{url.database}_eval").render_as_string(hide_password=False)
+    return get_settings().model_copy(
+        update={
+            "eval_database_url": eval_url,
+            "eval_commerce_url": "http://eval-shop",
+            "commerce_backoff_seconds": 0,
+        }
+    )
+
+
+@pytest.fixture
+def eval_shop(mock_commerce: ModuleType) -> httpx.AsyncBaseTransport:
+    """An evaluation shop: admin endpoints on, so each case loads its own data."""
+    return ASGITransport(
+        app=mock_commerce.create_app(mock_commerce.MockSettings(admin_enabled=True))
+    )

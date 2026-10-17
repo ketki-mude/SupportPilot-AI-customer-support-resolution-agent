@@ -33,6 +33,19 @@ services:
       - ./mock_commerce:/app
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
 
+  # A separate shop for evaluations: each case loads its own data here, never into the demo shop.
+  mock_commerce_eval:
+    build:
+      context: ./mock_commerce
+      args:
+        INSTALL_DEV: "true"
+    environment:
+      MOCK_ADMIN_ENABLED: "true"
+      MOCK_FAILURE_RATE: "0"
+    volumes:
+      - ./mock_commerce:/app
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
+
   backend:
     build:
       context: ./backend
@@ -44,20 +57,27 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-supportpilot}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-supportpilot}
       TEST_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-supportpilot}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-supportpilot}_test
       MOCK_COMMERCE_URL: http://mock_commerce:8001
+      EVAL_COMMERCE_URL: http://mock_commerce_eval:8001
+      # Recorded in evaluation reports started from the API; `make up` passes the commit.
+      EVAL_GIT_COMMIT: ${EVAL_GIT_COMMIT:-unknown}
       # Checkpoints hold plain JSON only; refuse to deserialize arbitrary Python types.
       LANGGRAPH_STRICT_MSGPACK: "true"
     ports:
       - "127.0.0.1:${BACKEND_HOST_PORT:-8000}:8000"
     volumes:
       - ./backend:/app
+      # The evaluation dataset and saved reports, for `make eval` and the /evals page.
+      - ./evals:/evals
     depends_on:
       db:
         condition: service_healthy
       mock_commerce:
         condition: service_healthy
+      mock_commerce_eval:
+        condition: service_healthy
     command: >-
       sh -c "alembic upgrade head &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --no-access-log"
 
   frontend:
     build:

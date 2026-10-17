@@ -3,6 +3,8 @@
 import uuid
 from typing import Any
 
+from pydantic import ValidationError
+
 from app.agents.guardrails import UnauthorizedActionError, authorize_action
 from app.agents.nodes.base import step
 from app.agents.runtime import AgentDeps
@@ -38,6 +40,8 @@ async def executor(state: AgentState, deps: AgentDeps) -> dict[str, Any]:
         result = await _run(state, deps, authorization.decision)
     except CommerceError as exc:
         return {"escalation": EscalationCause.TOOL_FAILURE, "errors": [str(exc)]}
+    except ValidationError as exc:  # already audited as rejected_invalid by the tool
+        return {"escalation": EscalationCause.INVALID_TOOL_CALL, "errors": [str(exc)]}
     return {"result": result}
 
 

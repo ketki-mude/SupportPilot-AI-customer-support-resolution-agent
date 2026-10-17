@@ -31,6 +31,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 SEED_PATH = Path(__file__).with_name("seed_data.json")
 FAULT_EXEMPT_PATHS = frozenset({"/health", "/docs", "/openapi.json"})
+ADMIN_PREFIX = "/admin/"
 
 Money = Annotated[Decimal, Field(max_digits=10, decimal_places=2)]
 PositiveMoney = Annotated[Decimal, Field(gt=0, max_digits=10, decimal_places=2)]
@@ -46,6 +47,19 @@ class MockSettings(BaseSettings):
     slow_fraction: float = Field(
         default=0.5, ge=0, le=1, description="Share of faults that are slow"
     )
+    slow_seconds: float = Field(default=2.0, ge=0, le=30)
+    random_seed: int | None = None
+    # Evaluation instances only: lets the harness load each case's data and faults.
+    admin_enabled: bool = False
+
+
+class Faults(BaseModel):
+    """Fault injection for one run of the shop; replaceable through the admin API."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    failure_rate: float = Field(default=0.0, ge=0, le=1)
+    slow_fraction: float = Field(default=0.5, ge=0, le=1)
     slow_seconds: float = Field(default=2.0, ge=0, le=30)
     random_seed: int | None = None
 
@@ -330,8 +344,12 @@ def _days_ago(now: datetime, days: int | None) -> datetime | None:
 
 
 def load_store(path: Path, now: datetime) -> CommerceStore:
-    """Build the store from seed JSON, turning relative day offsets into timestamps."""
-    data = json.loads(path.read_text())
+    """Build the store from a seed file."""
+    return build_store(json.loads(path.read_text()), now)
+
+
+def build_store(data: dict[str, Any], now: datetime) -> CommerceStore:
+    """Build the store from seed data, turning relative day offsets into timestamps."""
     customers = {
         raw["id"]: Customer(
             id=raw["id"],
@@ -364,7 +382,7 @@ def load_store(path: Path, now: datetime) -> CommerceStore:
             payment_method_last4=raw["payment_method_last4"],
         )
     store = CommerceStore(customers, orders)
-    for raw in data["prior_refunds"]:
+    for raw in data.get("prior_refunds", []):
         store.record_refund(
             Refund(
                 refund_id=raw["refund_id"],
@@ -375,7 +393,7 @@ def load_store(path: Path, now: datetime) -> CommerceStore:
             ),
             as_remedy=True,
         )
-    for raw in data["prior_replacements"]:
+    for raw in data.get("prior_replacements", []):
         store.record_replacement(
             Replacement(
                 replacement_id=raw["replacement_id"],
@@ -449,32 +467,70 @@ def _install_error_handlers(app: FastAPI) -> None:
         )
 
 
-def _install_fault_injection(app: FastAPI, settings: MockSettings) -> None:
-    rng = random.Random(settings.random_seed)  # noqa: S311  # simulation, not cryptography
+@dataclass
+class Runtime:
+    """The shop's current data and faults. The admin API swaps both between eval cases."""
 
+    store: CommerceStore
+    faults: Faults
+    rng: random.Random
+
+    @classmethod
+    def create(cls, store: CommerceStore, faults: Faults) -> "Runtime":
+        return cls(store, faults, random.Random(faults.random_seed))  # noqa: S311  # simulation
+
+    def reset(self, store: CommerceStore, faults: Faults) -> None:
+        self.store = store
+        self.faults = faults
+        self.rng = random.Random(faults.random_seed)  # noqa: S311  # simulation
+
+
+class ResetRequest(BaseModel):
+    """A case's data in seed-file format, plus the faults to apply while it runs."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fixture: dict[str, Any]
+    faults: Faults = Field(default_factory=lambda: Faults(failure_rate=0.0))
+
+
+def _faulted(path: str) -> bool:
+    return path not in FAULT_EXEMPT_PATHS and not path.startswith(ADMIN_PREFIX)
+
+
+def _install_fault_injection(app: FastAPI, runtime: Runtime) -> None:
     @app.middleware("http")
     async def inject_faults(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        if request.url.path not in FAULT_EXEMPT_PATHS and rng.random() < settings.failure_rate:
-            if rng.random() >= settings.slow_fraction:
+        faults, rng = runtime.faults, runtime.rng
+        if _faulted(request.url.path) and rng.random() < faults.failure_rate:
+            if rng.random() >= faults.slow_fraction:
                 return _error(
                     HTTPStatus.SERVICE_UNAVAILABLE,
                     "service_unavailable",
                     "Injected failure: the commerce service is temporarily unavailable",
                     headers={"Retry-After": "1"},
                 )
-            await asyncio.sleep(settings.slow_seconds)
+            await asyncio.sleep(faults.slow_seconds)
         return await call_next(request)
 
 
 def create_app(settings: MockSettings | None = None, store: CommerceStore | None = None) -> FastAPI:
     """Build the mock API. Tests pass their own settings and store."""
     settings = settings or MockSettings()
-    commerce = store or load_store(SEED_PATH, datetime.now(UTC))
+    runtime = Runtime.create(
+        store or load_store(SEED_PATH, datetime.now(UTC)),
+        Faults(
+            failure_rate=settings.failure_rate,
+            slow_fraction=settings.slow_fraction,
+            slow_seconds=settings.slow_seconds,
+            random_seed=settings.random_seed,
+        ),
+    )
     app = FastAPI(title="Acme mock commerce API", version="1.0.0")
     _install_error_handlers(app)
-    _install_fault_injection(app, settings)
+    _install_fault_injection(app, runtime)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -482,22 +538,26 @@ def create_app(settings: MockSettings | None = None, store: CommerceStore | None
 
     @app.get("/customers/{customer_id}")
     async def get_customer(customer_id: str) -> Customer:
-        return commerce.get_customer(customer_id)
+        return runtime.store.get_customer(customer_id)
 
     @app.get("/customers/{customer_id}/orders")
     async def list_customer_orders(customer_id: str) -> list[Order]:
-        return commerce.orders_for(customer_id)
+        return runtime.store.orders_for(customer_id)
 
     @app.get("/orders/{order_id}")
     async def get_order(order_id: str) -> Order:
-        return commerce.get_order(order_id)
+        return runtime.store.get_order(order_id)
 
     @app.post("/refunds", status_code=HTTPStatus.CREATED, response_model=Refund)
     async def create_refund(
         body: RefundRequest, idempotency_key: IdempotencyKey = None
     ) -> Response:
         return await _run_idempotent(
-            commerce, "refunds", idempotency_key, body, lambda: commerce.create_refund(body)
+            runtime.store,
+            "refunds",
+            idempotency_key,
+            body,
+            lambda: runtime.store.create_refund(body),
         )
 
     @app.post("/replacements", status_code=HTTPStatus.CREATED, response_model=Replacement)
@@ -505,11 +565,11 @@ def create_app(settings: MockSettings | None = None, store: CommerceStore | None
         body: ReplacementRequest, idempotency_key: IdempotencyKey = None
     ) -> Response:
         return await _run_idempotent(
-            commerce,
+            runtime.store,
             "replacements",
             idempotency_key,
             body,
-            lambda: commerce.create_replacement(body),
+            lambda: runtime.store.create_replacement(body),
         )
 
     @app.post(
@@ -519,14 +579,35 @@ def create_app(settings: MockSettings | None = None, store: CommerceStore | None
         order_id: str, body: CancelRequest, idempotency_key: IdempotencyKey = None
     ) -> Response:
         return await _run_idempotent(
-            commerce,
+            runtime.store,
             "cancellations",
             idempotency_key,
             CancelFingerprint(order_id=order_id, reason=body.reason),
-            lambda: commerce.cancel_order(order_id, body.reason),
+            lambda: runtime.store.cancel_order(order_id, body.reason),
         )
 
+    if settings.admin_enabled:
+        _install_admin(app, runtime)
     return app
+
+
+def _install_admin(app: FastAPI, runtime: Runtime) -> None:
+    """Evaluation-only endpoints: load a case's data and read back what the agent did."""
+
+    @app.post("/admin/reset", status_code=HTTPStatus.NO_CONTENT)
+    async def reset(body: ResetRequest) -> Response:
+        async with runtime.store.lock:
+            runtime.reset(build_store(body.fixture, datetime.now(UTC)), body.faults)
+        return Response(status_code=HTTPStatus.NO_CONTENT)
+
+    @app.get("/admin/state")
+    async def state() -> dict[str, Any]:
+        store = runtime.store
+        return {
+            "refunds": [r.model_dump(mode="json") for r in store.refunds.values()],
+            "replacements": [r.model_dump(mode="json") for r in store.replacements.values()],
+            "orders": [o.model_dump(mode="json") for o in store.orders.values()],
+        }
 
 
 app = create_app()

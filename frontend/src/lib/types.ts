@@ -139,6 +139,15 @@ export interface CustomerContext {
   }[];
 }
 
+export interface TicketUsage {
+  runs: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: string;
+  latency_ms: number;
+  last_run_status: string | null;
+}
+
 export interface TicketDetail {
   ticket: Ticket;
   messages: Message[];
@@ -146,6 +155,7 @@ export interface TicketDetail {
   trace: AuditEntry[];
   customer_context: CustomerContext | null;
   customer_context_error: string | null;
+  usage: TicketUsage | null;
 }
 
 export interface Page<T> {
@@ -172,4 +182,95 @@ export interface AgentEvent {
   id: number | null;
   type: AgentEventType;
   data: Record<string, unknown>;
+}
+
+export type EvalLlm = "gemini" | "mock";
+
+export interface EvalCategoryScore {
+  cases: number;
+  passed: number;
+}
+
+export interface EvalMetrics {
+  cases: number;
+  passed: number;
+  policy_compliant: number;
+  unauthorized: number;
+  tool_calls: number;
+  tool_successes: number;
+  total_latency_ms: number;
+  total_cost_usd: string;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  by_category: Record<string, EvalCategoryScore>;
+  correct_resolution_rate: number;
+  policy_compliance_rate: number;
+  unauthorized_rate: number;
+  tool_success_rate: number;
+  avg_latency_ms: number;
+  avg_cost_usd: string;
+}
+
+export interface EvalRunSummary {
+  id: string;
+  started_at: string;
+  duration_seconds: number;
+  llm_mode: "live" | "mock";
+  provider: string;
+  model: string;
+  temperature: number;
+  git_commit: string;
+  dataset: { path: string; sha256: string; cases: number };
+  limit: number | null;
+  cases_planned: number;
+  cases_scored: number;
+  complete: boolean;
+  stopped_reason: string | null;
+  estimated_cost_usd: string;
+  metrics: EvalMetrics;
+}
+
+export interface EvalCaseResult {
+  id: string;
+  category: string;
+  passed: boolean;
+  policy_compliant: boolean;
+  unauthorized: boolean;
+  expected_intent: string | null;
+  observed_intent: string | null;
+  expected_action: string;
+  observed_action: string;
+  expected_requires_approval: boolean;
+  observed_requires_approval: boolean;
+  rule: string | null;
+  reasons: string[];
+  tool_calls: number;
+  tool_successes: number;
+  latency_ms: number;
+  cost_usd: string;
+}
+
+export interface EvalReport extends EvalRunSummary {
+  results: EvalCaseResult[];
+}
+
+export interface EvalJob {
+  id: string;
+  status: "running" | "finished" | "failed";
+  llm: EvalLlm;
+  limit: number | null;
+  cases_planned: number;
+  cases_done: number;
+  started_at: string;
+  finished_at: string | null;
+  report_id: string | null;
+  error: string | null;
+}
+
+export interface EvalOverview {
+  current: EvalJob | null;
+  runs: EvalRunSummary[];
+  dataset_cases: number;
+  model: string;
+  full_run_estimate_usd: string;
 }

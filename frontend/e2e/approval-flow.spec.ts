@@ -54,6 +54,12 @@ test("a supervisor approves a refund and the customer's chat updates live", asyn
   const ticketNumber = header?.match(/TCK-\d+/)?.[0];
   expect(ticketNumber).toBeTruthy();
 
+  // A reload keeps the session: the refresh cookie restores it, nothing is in localStorage.
+  await customer.reload();
+  await expect(customer).toHaveURL(/\/chat$/);
+  await expect(customer.getByTestId("latest-status")).toHaveText("Waiting for approval");
+  expect(await customer.evaluate(() => JSON.stringify(window.localStorage))).toBe("{}");
+
   await signIn(supervisor, "supervisor");
   await expect(supervisor).toHaveURL(/\/console/);
   await supervisor.getByRole("button", { name: "Needs approval" }).click();
@@ -63,14 +69,22 @@ test("a supervisor approves a refund and the customer's chat updates live", asyn
   await expect(bar).toContainText(/Policy match, agent \d+% sure/);
   await expectAtMostOnePrimaryButton(supervisor);
   await bar.getByPlaceholder("Add a note (optional)").fill("Damage confirmed from the description");
-  await bar.getByRole("button", { name: "Approve" }).click();
+  await bar.getByRole("button", { name: "Approve" }).dblclick(); // an impatient supervisor
   await expect(bar.getByRole("status")).toContainText("Approved");
+  await expect(bar.getByRole("alert")).toHaveCount(0);
 
   // No reload: the customer's chat gets the result over the live event stream.
   await expect(customer.getByText(/I've refunded \$79\.99 to your card ending 4242/)).toBeVisible({
     timeout: 30_000,
   });
   await expect(customer.getByTestId("latest-status")).toHaveText("Resolved");
+
+  // The shop itself confirms one refund, not two.
+  const mockUrl = process.env.E2E_MOCK_URL;
+  if (mockUrl) {
+    const order = await (await fetch(`${mockUrl}/orders/ORD-10001`)).json();
+    expect(order.refunded_amount).toBe("79.99");
+  }
 
   await supervisor.goto(`/audit?ticket=${ticketNumber}`);
   await expect(supervisor.getByRole("cell", { name: "supervisor@demo.com" }).first()).toBeVisible();

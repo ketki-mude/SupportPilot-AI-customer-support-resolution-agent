@@ -2,6 +2,7 @@
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -97,6 +98,17 @@ class CustomerContext(BaseModel):
     recent_orders: list[OrderBrief]
 
 
+class TicketUsage(BaseModel):
+    """What the agent spent on this ticket across all its runs."""
+
+    runs: int
+    input_tokens: int
+    output_tokens: int
+    cost_usd: Decimal
+    latency_ms: int
+    last_run_status: str | None
+
+
 class TicketDetail(BaseModel):
     """Staff get everything. Customers get the ticket and its messages only."""
 
@@ -106,3 +118,4 @@ class TicketDetail(BaseModel):
     trace: list[AuditEntryRead] = Field(default_factory=list)
     customer_context: CustomerContext | None = None
     customer_context_error: str | None = None
+    usage: TicketUsage | None = None

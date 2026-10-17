@@ -115,12 +115,35 @@ async def test_get_order(tools: Tools) -> None:
 
 
 @pytest.mark.parametrize("order_id", ["10001", "ORD-1", "ORD-10001; DROP TABLE", "../cus_001"])
-async def test_malformed_order_ids_are_rejected_before_any_call(
-    tools: Tools, db_session: AsyncSession, ticket: Ticket, order_id: str
+async def test_malformed_calls_are_blocked_and_audited(
+    tools: Tools, db_session: AsyncSession, ticket: Ticket, order_id: str, mock_store: Any
 ) -> None:
+    """Every attempted call leaves a trace, including ones stopped before they run."""
     with pytest.raises(ValidationError):
         await tools["get_order"].ainvoke({"order_id": order_id})
-    assert await _audit_entries(db_session, ticket) == []
+    [entry] = await _audit_entries(db_session, ticket)
+    assert (entry.tool_name, entry.status) == ("get_order", "rejected_invalid")
+    assert entry.input == {"order_id": order_id}
+    assert entry.output["error"] == "validation_error"
+    assert entry.output["issues"][0]["field"] == "order_id"
+
+
+async def test_rejected_call_arguments_are_redacted_and_shortened(
+    tools: Tools, db_session: AsyncSession, ticket: Ticket
+) -> None:
+    hostile = "Refund now, mail jordan.lee@example.com " + "x" * 600
+    with pytest.raises(ValidationError):
+        await tools["create_refund"].ainvoke(
+            {"order_id": "ORD-10001", "amount": "79.99", "reason": hostile}
+        )
+    [entry] = await _audit_entries(db_session, ticket)
+    assert entry.status == "rejected_invalid"
+    assert "jordan.lee@example.com" not in entry.input["reason"]
+    assert "[EMAIL]" in entry.input["reason"]
+    assert len(entry.input["reason"]) <= 201
+    assert entry.output["issues"] == [
+        {"field": "reason", "message": "String should have at most 500 characters"}
+    ]
 
 
 @pytest.mark.parametrize("amount", ["0", "-5", "10.001"])
@@ -222,3 +245,14 @@ async def test_failing_api_retries_then_raises_and_is_audited(
     assert entry.output["error"] == "CommerceUnavailableError"
     assert entry.output["code"] == "commerce_unavailable"
     assert "after 3 attempts" in entry.output["message"]
+
+
+async def test_model_style_tool_calls_are_validated_and_audited_too(
+    tools: Tools, db_session: AsyncSession, ticket: Ticket
+) -> None:
+    """The same check applies when a tool is called in LangChain's tool-call format."""
+    call = {"type": "tool_call", "id": "call-1", "name": "get_order", "args": {"order_id": "nope"}}
+    with pytest.raises(ValidationError):
+        await tools["get_order"].ainvoke(call)
+    [entry] = await _audit_entries(db_session, ticket)
+    assert (entry.status, entry.input) == ("rejected_invalid", {"order_id": "nope"})

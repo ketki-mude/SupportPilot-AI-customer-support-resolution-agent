@@ -3,11 +3,11 @@ import { Sparkles } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { CATEGORY_LABEL } from "@/lib/format";
-import type { Ticket } from "@/lib/types";
+import { agentUsage, CATEGORY_LABEL } from "@/lib/format";
+import type { Ticket, TicketUsage } from "@/lib/types";
 
 /** Two or three lines from the intake step, so staff know the case before reading it. */
-export function AiSummary({ ticket }: { ticket: Ticket }) {
+export function AiSummary({ ticket, usage }: { ticket: Ticket; usage?: TicketUsage | null }) {
   return (
     <Card>
       <CardContent className="flex flex-col gap-2">
@@ -25,6 +25,9 @@ export function AiSummary({ ticket }: { ticket: Ticket }) {
         <p className="line-clamp-3 leading-relaxed">
           {ticket.summary ?? "The agent hasn't summarized this request yet."}
         </p>
+        {usage && usage.runs > 0 ? (
+          <p className="text-xs text-subtle">{agentUsage(usage)}</p>
+        ) : null}
       </CardContent>
     </Card>
   );

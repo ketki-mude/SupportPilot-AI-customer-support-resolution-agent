@@ -3,10 +3,10 @@
 from decimal import Decimal
 from enum import StrEnum
 from functools import lru_cache
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import Field, SecretStr, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class LLMProvider(StrEnum):
@@ -33,10 +33,24 @@ class Settings(BaseSettings):
 
     database_url: str
     test_database_url: str | None = None
+    db_command_timeout_seconds: float = Field(default=15, gt=0, le=300)
+
+    # Hardening for every request.
+    request_timeout_seconds: float = Field(default=30, gt=0, le=600)
+    max_request_bytes: int = Field(default=64 * 1024, ge=1024)
+    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    chat_rate_limit_per_minute: int = Field(default=10, ge=1)
+    login_rate_limit_per_minute: int = Field(default=10, ge=1)
 
     jwt_secret: SecretStr = Field(min_length=32)
     jwt_algorithm: Literal["HS256", "HS384", "HS512"] = "HS256"
-    access_token_expire_minutes: int = Field(default=60, ge=1, le=24 * 60)
+    access_token_expire_minutes: int = Field(default=15, ge=1, le=24 * 60)
+    refresh_token_expire_days: int = Field(default=7, ge=1, le=90)
+    # A just-rotated refresh token still works this long, so two tabs refreshing at once
+    # do not look like token theft.
+    refresh_reuse_grace_seconds: int = Field(default=10, ge=0, le=300)
+    # Defaults to secure cookies in production only, so local http works.
+    cookie_secure: bool | None = None
     bcrypt_rounds: int = Field(default=12, ge=4, le=16)
 
     llm_provider: LLMProvider = LLMProvider.GEMINI
@@ -58,9 +72,20 @@ class Settings(BaseSettings):
     langsmith_project: str = "supportpilot"
 
     mock_commerce_url: str = "http://localhost:8001"
+    # Evaluations: their own database and their own shop, never the demo ones.
+    eval_database_url: str | None = None
+    eval_commerce_url: str = "http://localhost:8002"
+    # Where the dataset and saved reports live. Unset: the evals/ folder next to the backend.
+    eval_dir: str | None = None
+    # Recorded in every evaluation report; `make` passes the current commit.
+    eval_git_commit: str = "unknown"
     commerce_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
     commerce_max_attempts: int = Field(default=3, ge=1, le=10)
     commerce_backoff_seconds: float = Field(default=0.5, ge=0, le=10)
+    # After this many failed calls in a row, stop calling for the cooldown and escalate fast.
+    commerce_breaker_threshold: int = Field(default=5, ge=1)
+    commerce_breaker_cooldown_seconds: float = Field(default=30, gt=0)
+    agent_run_timeout_seconds: float = Field(default=120, gt=0, le=1800)
 
     refund_window_days: int = Field(default=30, ge=1)
     auto_approve_max_usd: Decimal = Field(default=Decimal("50"), ge=0)
@@ -73,6 +98,20 @@ class Settings(BaseSettings):
     seed_agent_password: SecretStr | None = None
     seed_supervisor_password: SecretStr | None = None
     seed_admin_password: SecretStr | None = None
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_origins(cls, value: object) -> object:
+        """CORS_ORIGINS is a comma-separated list, e.g. "https://a.example,https://b.example"."""
+        if isinstance(value, str):
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
+
+    @property
+    def secure_cookies(self) -> bool:
+        return (
+            self.cookie_secure if self.cookie_secure is not None else self.app_env == "production"
+        )
 
     @model_validator(mode="after")
     def _check_refund_thresholds(self) -> Self:

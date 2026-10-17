@@ -2,6 +2,10 @@ import type {
   Approval,
   AuditEntry,
   ChatResponse,
+  EvalJob,
+  EvalLlm,
+  EvalOverview,
+  EvalReport,
   Page,
   Ticket,
   TicketDetail,
@@ -24,15 +28,32 @@ export class ApiError extends Error {
 
 interface ApiHooks {
   getToken: () => string | null;
+  /** Exchange the refresh cookie for a new access token, or null if the session is over. */
+  refresh: () => Promise<string | null>;
   onUnauthorized: () => void;
 }
 
-let hooks: ApiHooks = { getToken: () => null, onUnauthorized: () => undefined };
+let hooks: ApiHooks = {
+  getToken: () => null,
+  refresh: async () => null,
+  onUnauthorized: () => undefined,
+};
+let refreshing: Promise<string | null> | null = null;
 
-/** Called once by the auth provider so every request carries the current token. */
+/** Called by the auth provider so every request carries the current token. */
 export function configureApi(next: ApiHooks): void {
   hooks = next;
 }
+
+/** One refresh at a time: requests that fail together all wait for the same new token. */
+function refreshOnce(): Promise<string | null> {
+  refreshing ??= hooks.refresh().finally(() => {
+    refreshing = null;
+  });
+  return refreshing;
+}
+
+const SESSION_PATHS = new Set(["/auth/login", "/auth/refresh", "/auth/logout"]);
 
 type Query = Record<string, string | number | undefined | null>;
 
@@ -45,12 +66,11 @@ function withQuery(path: string, query?: Query): string {
   return search ? `${path}?${search}` : path;
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const token = hooks.getToken();
-  let response: Response;
+async function send(method: string, path: string, body: unknown, token: string | null): Promise<Response> {
   try {
-    response = await fetch(`/api${path}`, {
+    return await fetch(`/api${path}`, {
       method,
+      credentials: "same-origin",
       headers: {
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -60,7 +80,17 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   } catch {
     throw new ApiError(0, "network_error", "Can't reach the server. Check your connection.");
   }
-  if (response.status === 401 && token) hooks.onUnauthorized();
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const token = hooks.getToken();
+  let response = await send(method, path, body, token);
+  // An expired access token: renew it once with the refresh cookie, then retry.
+  if (response.status === 401 && !SESSION_PATHS.has(path)) {
+    const fresh = await refreshOnce();
+    if (fresh) response = await send(method, path, body, fresh);
+    if (response.status === 401 && token) hooks.onUnauthorized();
+  }
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as {
       error?: { code?: string; message?: string };
@@ -71,6 +101,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       payload?.error?.message ?? response.statusText,
     );
   }
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
@@ -84,6 +115,8 @@ export interface TicketQuery {
 export const api = {
   login: (email: string, password: string) =>
     request<TokenResponse>("POST", "/auth/login", { email, password }),
+  refresh: () => request<TokenResponse>("POST", "/auth/refresh"),
+  logout: () => request<void>("POST", "/auth/logout"),
   me: () => request<User>("GET", "/auth/me"),
 
   createTicket: (message: string) => request<ChatResponse>("POST", "/chat/tickets", { message }),
@@ -104,6 +137,11 @@ export const api = {
 
   listAudit: (query: { ticket_id?: string; page?: number; page_size?: number } = {}) =>
     request<Page<AuditEntry>>("GET", withQuery("/audit", query)),
+
+  evalOverview: () => request<EvalOverview>("GET", "/evals/runs"),
+  evalReport: (reportId: string) => request<EvalReport>("GET", `/evals/runs/${reportId}`),
+  startEval: (llm: EvalLlm, limit: number | null) =>
+    request<EvalJob>("POST", "/evals/run", { llm, limit }),
 };
 
 export const streamUrl = (ticketId: string) => `/api/chat/tickets/${ticketId}/stream`;

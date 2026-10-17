@@ -21,6 +21,7 @@ class AuditStatus(StrEnum):
     FAILURE = "failure"
     FLAGGED = "flagged"
     ESCALATED = "escalated"
+    REJECTED_INVALID = "rejected_invalid"
 
 
 class AuditService:

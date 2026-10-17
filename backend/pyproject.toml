@@ -37,6 +37,7 @@ dependencies = [
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.25",
+    "pytest-cov>=6.0",
     "ruff>=0.8",
     "mypy>=1.13",
 ]
@@ -65,6 +66,17 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 module = ["pgvector.*", "fastembed.*"]
 ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+# SQLAlchemy's async engine runs on greenlets; without this, lines after awaits go untracked.
+concurrency = ["greenlet", "thread"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "@overload"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -11,7 +11,9 @@ from collections import defaultdict
 from typing import Any
 
 import structlog
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.embeddings import Embeddings
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -47,6 +49,7 @@ class AgentRunner:
         embeddings: Embeddings,
         settings: Settings,
         events: EventBus,
+        tracer: BaseCallbackHandler | None = None,
     ) -> None:
         self.graph = graph
         self.commerce = commerce
@@ -56,16 +59,20 @@ class AgentRunner:
         self._llm = llm
         self._embeddings = embeddings
         self._settings = settings
+        self._tracer = tracer
         self._locks: defaultdict[uuid.UUID, asyncio.Lock] = defaultdict(asyncio.Lock)
-        self._tasks: set[asyncio.Task[AgentRunStatus]] = set()
+        self._tasks: set[asyncio.Task[AgentRunStatus | None]] = set()
 
-    def start(self, ticket_id: uuid.UUID, customer_id: str) -> asyncio.Task[AgentRunStatus]:
+    def start(self, ticket_id: uuid.UUID, customer_id: str) -> asyncio.Task[AgentRunStatus | None]:
         """Process the ticket's latest customer message in the background."""
         graph_input = {"ticket_id": str(ticket_id), "customer_id": customer_id}
         return self._spawn(ticket_id, customer_id, graph_input)
 
-    def resume(self, ticket_id: uuid.UUID, customer_id: str) -> asyncio.Task[AgentRunStatus]:
-        """Continue a run paused for approval. The decision itself is read from the database."""
+    def resume(self, ticket_id: uuid.UUID, customer_id: str) -> asyncio.Task[AgentRunStatus | None]:
+        """Continue a run paused for approval. The decision itself is read from the database.
+
+        Resuming a ticket with nothing paused (a duplicate resume) does nothing.
+        """
         return self._spawn(ticket_id, customer_id, Command(resume={"decided": True}))
 
     async def wait(self) -> None:
@@ -75,15 +82,43 @@ class AgentRunner:
 
     def _spawn(
         self, ticket_id: uuid.UUID, customer_id: str, graph_input: Any
-    ) -> asyncio.Task[AgentRunStatus]:
+    ) -> asyncio.Task[AgentRunStatus | None]:
         task = asyncio.create_task(self.run(ticket_id, customer_id, graph_input))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return task
 
-    async def run(self, ticket_id: uuid.UUID, customer_id: str, graph_input: Any) -> AgentRunStatus:
-        """Run the graph to its next pause or end, then record the run."""
-        async with self._locks[ticket_id], self._session_factory() as session:
+    def _config(self, ticket_id: uuid.UUID) -> RunnableConfig:
+        return {
+            "configurable": {"thread_id": str(ticket_id)},
+            "run_name": "support_ticket",
+            "tags": ["supportpilot"],
+            "metadata": {"ticket_id": str(ticket_id)},
+            "callbacks": [self._tracer] if self._tracer else [],
+        }
+
+    async def run(
+        self, ticket_id: uuid.UUID, customer_id: str, graph_input: Any
+    ) -> AgentRunStatus | None:
+        """Run the graph to its next pause or end, then record the run.
+
+        Returns None when there was nothing to do (a resume with no paused run).
+        """
+        with structlog.contextvars.bound_contextvars(ticket_id=str(ticket_id)):
+            async with self._locks[ticket_id]:
+                if isinstance(graph_input, Command) and not await self._is_paused(ticket_id):
+                    logger.info("resume_skipped", reason="nothing is waiting for approval")
+                    return None
+                return await self._run_locked(ticket_id, customer_id, graph_input)
+
+    async def _is_paused(self, ticket_id: uuid.UUID) -> bool:
+        snapshot = await self.graph.aget_state(self._config(ticket_id))
+        return "await_approval" in snapshot.next
+
+    async def _run_locked(
+        self, ticket_id: uuid.UUID, customer_id: str, graph_input: Any
+    ) -> AgentRunStatus:
+        async with self._session_factory() as session:
             run = AgentRun(ticket_id=ticket_id, thread_id=str(ticket_id))
             session.add(run)
             await session.commit()
@@ -110,9 +145,11 @@ class AgentRunner:
             started = time.perf_counter()
             status = AgentRunStatus.FAILED
             try:
-                result = await self.graph.ainvoke(
-                    graph_input, {"configurable": {"thread_id": str(ticket_id)}}, context=deps
-                )
+                # A run that hangs (a stuck dependency) is cut off and handed to a human.
+                async with asyncio.timeout(self._settings.agent_run_timeout_seconds):
+                    result = await self.graph.ainvoke(
+                        graph_input, self._config(ticket_id), context=deps
+                    )
                 status = (
                     AgentRunStatus.PAUSED
                     if result.get("__interrupt__")

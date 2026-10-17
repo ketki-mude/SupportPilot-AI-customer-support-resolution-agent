@@ -32,7 +32,12 @@ async def test_health_reports_database_outage() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/api/health")
     assert response.status_code == 503
-    assert response.json() == {"status": "degraded", "database": "unavailable", "version": "0.1.0"}
+    assert response.json() == {
+        "status": "degraded",
+        "database": "unavailable",
+        "version": "0.1.0",
+        "commerce_circuit": None,
+    }
 
 
 async def test_openapi_docs_are_served(client: AsyncClient) -> None:

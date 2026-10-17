@@ -20,11 +20,15 @@ class AppError(Exception):
     code: str = "bad_request"
     headers: dict[str, str] | None = None
 
-    def __init__(self, message: str, *, code: str | None = None) -> None:
+    def __init__(
+        self, message: str, *, code: str | None = None, headers: dict[str, str] | None = None
+    ) -> None:
         super().__init__(message)
         self.message = message
         if code is not None:
             self.code = code
+        if headers is not None:
+            self.headers = {**(self.headers or {}), **headers}
 
 
 class UnauthorizedError(AppError):
@@ -54,6 +58,13 @@ class ServiceUnavailableError(AppError):
 
     status_code = HTTPStatus.SERVICE_UNAVAILABLE
     code = "service_unavailable"
+
+
+class RateLimitedError(AppError):
+    """Too many requests in the current window."""
+
+    status_code = HTTPStatus.TOO_MANY_REQUESTS
+    code = "rate_limited"
 
 
 class ConflictError(AppError):

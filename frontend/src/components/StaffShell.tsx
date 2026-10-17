@@ -16,15 +16,18 @@ interface StaffShellProps {
 export function StaffShell({ children, onOpenSearch }: StaffShellProps) {
   const { user, logout } = useAuth();
   const link = ({ isActive }: { isActive: boolean }) =>
-    cn("rounded-control px-3 py-1.5 text-sm", isActive ? "bg-muted text-foreground" : "text-subtle hover:text-foreground");
+    cn("whitespace-nowrap rounded-control px-2 py-1.5 text-sm sm:px-3", isActive ? "bg-muted text-foreground" : "text-subtle hover:text-foreground");
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b-hairline border-border bg-surface px-4">
         <AcmeMark />
         <span className="hidden font-semibold sm:inline">SupportPilot</span>
-        <nav className="ml-2 flex items-center gap-1" aria-label="Main">
+        <nav className="flex items-center gap-0.5 sm:ml-2 sm:gap-1" aria-label="Main">
           <NavLink to="/console" className={link}>Console</NavLink>
           <NavLink to="/audit" className={link}>Audit log</NavLink>
+          {user?.role === "admin" ? (
+            <NavLink to="/evals" className={link}>Evaluations</NavLink>
+          ) : null}
         </nav>
         {onOpenSearch ? (
           <button

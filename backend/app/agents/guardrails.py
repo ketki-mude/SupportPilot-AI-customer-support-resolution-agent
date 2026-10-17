@@ -3,6 +3,7 @@ that stops the executor from acting without an approval or an auto-approve decis
 
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from app.db.models import Approval, ApprovalStatus
 from app.schemas.agent import Decision, PolicyDecision, ProposedAction
@@ -33,9 +34,13 @@ _INJECTION_PATTERNS = {
         r".{0,60}\b(approve|authori[sz]e|refund|override)\b",
         re.IGNORECASE,
     ),
+    "fake_role_tag": re.compile(
+        r"(^|\n)\s*(system|assistant|developer|admin)\s*:|</?\s*(system|instructions?|prompt)\s*>",
+        re.IGNORECASE,
+    ),
     "forced_approval": re.compile(
         r"\b(auto[- ]?approve|approve (it|this|my refund) (now|immediately)"
-        r"|skip (the )?(approval|review))\b",
+        r"|skip (the )?(approval|review)|(already|pre)[- ]?approved)\b",
         re.IGNORECASE,
     ),
 }
@@ -54,6 +59,21 @@ def redact_pii(text: str) -> str:
     text = _EMAIL.sub("[EMAIL]", text)
     text = _CARD.sub(lambda m: "[CARD]" if _luhn_valid(m.group()) else m.group(), text)
     return _PHONE.sub("[PHONE]", text)
+
+
+_MAX_LOGGED_CHARS = 200
+
+
+def redact_value(value: Any) -> Any:
+    """Redact and shorten every string in a nested value, for logging untrusted arguments."""
+    if isinstance(value, str):
+        text = redact_pii(value)
+        return text if len(text) <= _MAX_LOGGED_CHARS else text[:_MAX_LOGGED_CHARS] + "…"
+    if isinstance(value, dict):
+        return {str(k): redact_value(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [redact_value(v) for v in value]
+    return value
 
 
 def detect_injection(text: str) -> list[str]:

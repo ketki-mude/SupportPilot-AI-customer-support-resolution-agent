@@ -9,7 +9,14 @@ from fastapi.responses import StreamingResponse
 
 from app.agents.followups import receive_follow_up
 from app.agents.runtime import AgentEvent, EventType
-from app.api.deps import AgentRunnerDep, CurrentUser, CustomerUser, SessionDep, visible_customer_id
+from app.api.deps import (
+    AgentRunnerDep,
+    ChatRateLimit,
+    CurrentUser,
+    CustomerUser,
+    SessionDep,
+    visible_customer_id,
+)
 from app.schemas.chat import ChatMessageCreate, ChatResponse
 from app.schemas.errors import ErrorResponse
 from app.schemas.ticket import MessageRead, TicketRead
@@ -19,7 +26,11 @@ from app.services.audit_service import AuditStatus
 router = APIRouter(
     prefix="/chat",
     tags=["chat"],
-    responses={401: {"model": ErrorResponse}, 403: {"model": ErrorResponse}},
+    responses={
+        401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse},
+        429: {"model": ErrorResponse},
+    },
 )
 
 
@@ -31,7 +42,11 @@ def _customer_id(user: CustomerUser) -> str:
 
 @router.post("/tickets", status_code=201)
 async def create_ticket(
-    body: ChatMessageCreate, user: CustomerUser, session: SessionDep, runner: AgentRunnerDep
+    body: ChatMessageCreate,
+    user: CustomerUser,
+    session: SessionDep,
+    runner: AgentRunnerDep,
+    _: ChatRateLimit,
 ) -> ChatResponse:
     """Open a ticket with the customer's first message and start the agent on it."""
     customer_id = _customer_id(user)
@@ -56,6 +71,7 @@ async def send_message(
     user: CustomerUser,
     session: SessionDep,
     runner: AgentRunnerDep,
+    _: ChatRateLimit,
 ) -> ChatResponse:
     """Add a customer message. Only open tickets run the agent again."""
     customer_id = _customer_id(user)

@@ -111,6 +111,19 @@ async def test_results_are_ranked_and_capped(
     assert all(score >= get_settings().rag_min_similarity for score in scores)
 
 
+async def test_scoped_search_keeps_the_governing_sections(
+    db_session: AsyncSession, embeddings: Embeddings, ingested: dict[str, int]
+) -> None:
+    """Customer wording can score below the floor; scoped to a document, it still finds them."""
+    query = "refund: The espresso machine I received is leaking water everywhere."
+    assert await _search(db_session, embeddings, query) == []
+    results = await retrieve_policies(
+        db_session, embeddings, query, top_k=4, min_similarity=0.0, sources=["refund_policy.md"]
+    )
+    assert len(results) == 4
+    assert {r.source for r in results} == {"refund_policy.md"}
+
+
 async def test_retrieval_survives_repeated_reingestion(
     db_session: AsyncSession, embeddings: Embeddings, ingested: dict[str, int]
 ) -> None:

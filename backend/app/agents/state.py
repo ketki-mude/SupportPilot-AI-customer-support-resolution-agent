@@ -50,6 +50,7 @@ class EscalationCause(StrEnum):
     TOOL_FAILURE = "tool_failure"
     MODEL_FAILURE = "model_failure"
     UNAUTHORIZED_ACTION = "unauthorized_action"
+    INVALID_TOOL_CALL = "invalid_tool_call"
     CLARIFICATION_LIMIT = "clarification_limit"
 
 

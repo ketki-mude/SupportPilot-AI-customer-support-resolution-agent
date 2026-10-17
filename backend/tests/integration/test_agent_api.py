@@ -5,79 +5,20 @@ import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
 from typing import Any
 
 import httpx
 import pytest
 import uvicorn
 from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.runner import AgentRunner
 from app.api.deps import get_agent_runner
-from app.core.config import get_settings
-from app.core.security import Role, create_access_token, hash_password
-from app.db.models import AgentRun, User
-from app.db.session import get_session
-from app.main import create_app
-from tests.agent_support import ScriptedLLM, count, intake, resolution
+from app.db.models import AgentRun
+from tests.agent_support import Api, ScriptedLLM, count, intake, resolution
 
 Sessions = async_sessionmaker[AsyncSession]
-
-
-@dataclass
-class Api:
-    app: FastAPI
-    client: AsyncClient
-    tokens: dict[str, str]
-
-    def auth(self, who: str) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.tokens[who]}"}
-
-    async def post(self, path: str, who: str, body: dict[str, Any]) -> httpx.Response:
-        return await self.client.post(f"/api{path}", json=body, headers=self.auth(who))
-
-    async def get(self, path: str, who: str, **params: Any) -> httpx.Response:
-        return await self.client.get(f"/api{path}", params=params, headers=self.auth(who))
-
-
-PEOPLE = {
-    "customer": (Role.CUSTOMER, "cus_001"),
-    "other_customer": (Role.CUSTOMER, "cus_002"),
-    "agent": (Role.AGENT, None),
-    "supervisor": (Role.SUPERVISOR, None),
-}
-
-
-@pytest.fixture
-async def api(live_sessions: Sessions, agent: AgentRunner) -> AsyncIterator[Api]:
-    app = create_app()
-
-    async def session_override() -> AsyncIterator[AsyncSession]:
-        async with live_sessions() as session:
-            yield session
-
-    app.dependency_overrides[get_session] = session_override
-    app.dependency_overrides[get_agent_runner] = lambda: agent
-
-    tokens = {}
-    async with live_sessions() as session:
-        for who, (role, customer_id) in PEOPLE.items():
-            user = User(
-                email=f"{who}@acme.com",
-                password_hash=hash_password("x", rounds=4),
-                role=role,
-                customer_id=customer_id,
-            )
-            session.add(user)
-            await session.flush()
-            tokens[who] = create_access_token(user.id, role, get_settings())[0]
-        await session.commit()
-
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        yield Api(app, client, tokens)
 
 
 async def _open(api: Api, agent: AgentRunner, message: str) -> dict[str, Any]:
@@ -436,3 +377,19 @@ async def test_ticket_list_includes_customer_names(
     await _paused_ticket(api, agent, scripted_llm)
     [item] = (await api.get("/tickets", "agent")).json()["items"]
     assert item["customer_name"] == "Jordan Lee"
+
+
+async def test_staff_see_cost_and_latency_per_ticket(
+    api: Api, agent: AgentRunner, scripted_llm: ScriptedLLM
+) -> None:
+    ticket_id = await _paused_ticket(api, agent, scripted_llm)
+    approval_id = await _approval_id(api, ticket_id)
+    await api.post(f"/approvals/{approval_id}/decision", "supervisor", {"decision": "approve"})
+    await agent.wait()
+
+    usage = (await api.get(f"/tickets/{ticket_id}", "agent")).json()["usage"]
+    assert usage["runs"] == 2  # paused, then resumed
+    assert (usage["input_tokens"], usage["output_tokens"]) == (200, 40)
+    assert usage["cost_usd"] == "0.000160"
+    assert usage["latency_ms"] >= 0
+    assert usage["last_run_status"] == "completed"

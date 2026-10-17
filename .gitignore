@@ -12,3 +12,5 @@ dist/
 .DS_Store
 playwright-report/
 test-results/
+# Offline evaluation runs (CI and local smoke checks); live reports are kept.
+evals/reports/*-mock.json

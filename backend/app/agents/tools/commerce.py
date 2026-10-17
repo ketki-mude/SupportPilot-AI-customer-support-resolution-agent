@@ -1,11 +1,16 @@
-"""HTTP client for the Acme commerce API with timeouts, retries, and typed errors.
+"""HTTP client for the Acme commerce API with timeouts, retries, a circuit breaker, and typed
+errors.
 
 Only transient failures (timeouts, connection errors, 502/503/504) are retried. Everything the
-API deliberately refuses (4xx) surfaces immediately as a typed error.
+API deliberately refuses (4xx) surfaces immediately as a typed error. When calls keep failing,
+the circuit opens and calls fail fast, so the agent escalates instead of making customers wait.
 """
 
 import asyncio
+import time
+from collections.abc import Callable
 from decimal import Decimal
+from enum import StrEnum
 from typing import Any, Self, TypeVar
 from urllib.parse import quote
 
@@ -56,6 +61,66 @@ class _TransientError(Exception):
     """A failure worth retrying."""
 
 
+class CircuitState(StrEnum):
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+class CircuitBreaker:
+    """Opens after `threshold` failed calls in a row, then fails fast for `cooldown` seconds.
+
+    After the cooldown one trial call is let through: success closes the circuit, failure opens
+    it again. Only unavailability counts; a 404 or a business refusal means the service is up.
+    """
+
+    def __init__(
+        self, threshold: int, cooldown: float, clock: Callable[[], float] = time.monotonic
+    ) -> None:
+        self.threshold = threshold
+        self.cooldown = cooldown
+        self._clock = clock
+        self._failures = 0
+        self._opened_at: float | None = None
+        self._trial_in_flight = False
+
+    @property
+    def state(self) -> CircuitState:
+        if self._opened_at is None:
+            return CircuitState.CLOSED
+        if self._clock() - self._opened_at >= self.cooldown:
+            return CircuitState.HALF_OPEN
+        return CircuitState.OPEN
+
+    def before_call(self) -> None:
+        state = self.state
+        if state is CircuitState.OPEN or (
+            state is CircuitState.HALF_OPEN and self._trial_in_flight
+        ):
+            raise CommerceUnavailableError(
+                "Commerce API calls are paused after repeated failures", code="circuit_open"
+            )
+        if state is CircuitState.HALF_OPEN:
+            self._trial_in_flight = True
+
+    def record_success(self) -> None:
+        if self._opened_at is not None:
+            logger.info("commerce_circuit_closed")
+        self._failures = 0
+        self._opened_at = None
+        self._trial_in_flight = False
+
+    def record_failure(self) -> None:
+        self._failures += 1
+        reopen = self.state is CircuitState.HALF_OPEN
+        self._trial_in_flight = False
+        if reopen or self._failures >= self.threshold:
+            self._opened_at = self._clock()
+            logger.warning(
+                "commerce_circuit_opened", failures=self._failures, cooldown_s=self.cooldown
+            )
+
+
 class CommerceClient:
     """Async client for one commerce API base URL. Use as an async context manager."""
 
@@ -66,11 +131,13 @@ class CommerceClient:
         timeout_seconds: float,
         max_attempts: int,
         backoff_seconds: float,
+        breaker: CircuitBreaker | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._timeout = timeout_seconds
         self._max_attempts = max_attempts
         self._backoff = backoff_seconds
+        self.breaker = breaker or CircuitBreaker(threshold=5, cooldown=30)
         self._http = httpx.AsyncClient(
             base_url=base_url, timeout=timeout_seconds, transport=transport
         )
@@ -84,6 +151,9 @@ class CommerceClient:
             timeout_seconds=settings.commerce_timeout_seconds,
             max_attempts=settings.commerce_max_attempts,
             backoff_seconds=settings.commerce_backoff_seconds,
+            breaker=CircuitBreaker(
+                settings.commerce_breaker_threshold, settings.commerce_breaker_cooldown_seconds
+            ),
             transport=transport,
         )
 
@@ -150,6 +220,25 @@ class CommerceClient:
         idempotency_key: str | None = None,
     ) -> Any:
         """Send with retries on transient failures, then map the response to data or an error."""
+        self.breaker.before_call()
+        try:
+            data = await self._request_with_retries(method, path, json, idempotency_key)
+        except CommerceUnavailableError:
+            self.breaker.record_failure()
+            raise
+        except CommerceError:
+            self.breaker.record_success()  # the API answered; it refused this request
+            raise
+        self.breaker.record_success()
+        return data
+
+    async def _request_with_retries(
+        self,
+        method: str,
+        path: str,
+        json: dict[str, Any] | None,
+        idempotency_key: str | None,
+    ) -> Any:
         headers = {"Idempotency-Key": idempotency_key} if idempotency_key else {}
 
         def log_retry(state: RetryCallState) -> None:

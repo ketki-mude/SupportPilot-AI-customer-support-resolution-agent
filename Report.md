@@ -46,6 +46,7 @@ DevOps: Docker, Docker Compose, GitHub Actions, Makefile.
 - `db`: image `pgvector/pgvector:pg16`
 - `backend`: FastAPI app on port 8000
 - `mock_commerce`: separate FastAPI app on port 8001 that simulates Acme's order system
+- `mock_commerce_eval`: a second instance for evaluations only, with admin endpoints that load each case's data and faults (no host port)
 - `frontend`: Vite dev server (nginx in production) on port 5173
 
 ## Repository structure
@@ -55,10 +56,12 @@ supportpilot/
 ├── docker-compose.yml
 ├── .env.example
 ├── Makefile
-├── .github/workflows/ci.yml
+├── .github/workflows/ci.yml, .github/scripts/ci-env.sh
 ├── docs/
 │   ├── architecture.md          (mermaid diagrams)
-│   └── eval-report.md
+│   ├── deployment.md
+│   ├── eval-report.md           (written by `make eval`)
+│   └── screenshots/
 ├── backend/
 │   ├── pyproject.toml
 │   ├── Dockerfile
@@ -82,6 +85,7 @@ supportpilot/
 │   │   │   └── prompts/ *.md
 │   │   ├── rag/         chunking.py, embeddings.py, ingest.py, retriever.py
 │   │   ├── services/    ticket_service.py, approval_service.py, audit_service.py, policy_engine.py
+│   │   ├── evals/       dataset.py, harness.py, metrics.py, mock_llm.py, quota.py, report.py, jobs.py, cli.py
 │   │   └── observability/ tracing.py, cost.py
 │   ├── data/policies/   refund_policy.md, shipping_policy.md, billing_policy.md, cancellation_policy.md
 │   ├── scripts/         seed.py, ingest_policies.py
@@ -91,9 +95,8 @@ supportpilot/
 │   ├── main.py
 │   └── seed_data.json
 ├── evals/
-│   ├── dataset/cases.jsonl
-│   ├── run_evals.py
-│   ├── metrics.py
+│   ├── dataset/cases.jsonl, build_cases.py
+│   ├── run_evals.py             (entry point; the code is in backend/app/evals so it is typed and tested)
 │   └── reports/
 └── frontend/
     ├── package.json, vite.config.ts, tailwind.config.ts, Dockerfile
@@ -156,7 +159,7 @@ State (Pydantic): ticket_id, customer_id, messages, intent, order, policy_snippe
 Nodes and edges:
 1. `intake`: classify intent (refund, replacement, missing_order, cancellation, billing, other) with structured output, create or load the ticket, extract the order id. If the customer gives no order number, the `list_my_orders` tool (customer id from the authenticated token, never from the model; audited) lists their orders and the model proposes which one matches; code keeps only ids from that list. Several matches: ask, describing them by item and date. None: ask for more detail. At most 5 clarification turns, then escalate.
 2. `customer_data`: tools get_customer and get_order through the mock API; verify ownership.
-3. `policy_rag`: retrieve the top 4 policy chunks with section citations.
+3. `policy_rag`: retrieve the top 4 policy chunks with section citations, searching only the documents that govern the classified intent (refund and replacement: refund policy; cancellation, missing_order, billing: their own policies). The similarity floor applies only to searches without a known intent. Phase 6 finding: with a global floor, plain customer wording scored below it, the model saw no policy, and escalated requests the rules allow.
 4. `resolution`: LLM returns a structured `Proposal` (action: refund, replacement, cancel, info, escalate; items; amount; reason; confidence; citations).
 5. `policy_gate`: call `policy_engine.evaluate(proposal, order)`; returns decision auto_approve, needs_approval, deny, or escalate. This is plain Python. The engine itself writes nothing, so this node must write an audit entry for every decision (rule, reason, amount), including ownership denials, so an attempt on another customer's order is always recorded.
 6. `approval_gate`: only when needs_approval. Create an approval row, set ticket status to awaiting_approval, then call LangGraph `interrupt()`. The run resumes with `Command(resume=...)` when a supervisor decides.
@@ -213,6 +216,12 @@ Handle loading, empty, and error states on every page.
 ## Evaluation plan
 `evals/dataset/cases.jsonl` holds 80 cases. Each has: id, customer_message, fixture (order and customer data), expected_intent, expected_action, expected_requires_approval, must_not (for example "issue refund"). Include cases for: valid refunds under and over $50, outside the window, wrong owner, already refunded, in transit, prompt injection attempts, vague messages, and tool failures.
 Metrics: correct resolution rate, policy compliance rate, unauthorized-action rate (target exactly 0), tool-call success rate, average latency, average cost per ticket. Write results to `evals/reports/` and `docs/eval-report.md`. Never fabricate numbers; the README must only quote results from real runs.
+Phase 6 rules (agreed):
+- Isolation: every run recreates its own `<db>_eval` database (refusing any other name), and every case resets the dedicated `mock_commerce_eval` shop to its own fixture and faults. Evaluations never touch the demo tickets or the demo shop.
+- Reproducibility: temperature 0; every report records model, provider, UTC date, git commit (with `-dirty` for uncommitted changes), and the dataset's sha256.
+- Cost and quota: `--limit N`; rate-limit errors are retried with backoff; a daily-quota error stops the run, leaves the affected case unscored, and marks the report incomplete. The estimated cost is printed before a live run and the actual cost after it.
+- CI never calls a model: the 10-case smoke run uses an offline keyword stand-in and must pass all ten with zero unauthorized actions. The full live run is the manual `make eval` (needs `GOOGLE_API_KEY`).
+- Honest reporting: reports list every failed case with reasons; percentages are truncated, never rounded up; effects are read back from the shop, not from the agent. The README's results block is generated from a complete, full-dataset live report and is never edited by hand.
 
 ## Testing notes
 - Backend tests may run the mock shop in-process (mounted read-only by `docker-compose.test.yml`, used only by `make test`) to force failures deterministically. The running backend and any production image never include mock shop code.

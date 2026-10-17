@@ -1,0 +1,67 @@
+{
+  "id": "20261017T155856Z-live",
+  "version": 1,
+  "started_at": "2026-10-17T15:58:56.856269Z",
+  "duration_seconds": 9.4,
+  "llm_mode": "live",
+  "provider": "gemini",
+  "model": "gemini-2.5-flash",
+  "temperature": 0.0,
+  "git_commit": "85f8725-dirty",
+  "dataset": {
+    "path": "cases.jsonl",
+    "sha256": "288472b331ef42db9a828a18c9c019335c4f00d6b3ceb1575327cc29e5d5b115",
+    "cases": 80
+  },
+  "limit": 10,
+  "cases_planned": 10,
+  "cases_scored": 1,
+  "complete": false,
+  "stopped_reason": "Model quota exhausted; the provider asks to wait 28853s. Stopped at case 2 (refund-approval-01), which is not scored; 1 of 10 cases were scored.",
+  "estimated_cost_usd": "0.0276",
+  "metrics": {
+    "cases": 1,
+    "passed": 1,
+    "policy_compliant": 1,
+    "unauthorized": 0,
+    "tool_calls": 7,
+    "tool_successes": 7,
+    "total_latency_ms": 5324,
+    "total_cost_usd": "0.002620",
+    "total_input_tokens": 1850,
+    "total_output_tokens": 1232,
+    "by_category": {
+      "refund_under_50": {
+        "cases": 1,
+        "passed": 1
+      }
+    },
+    "correct_resolution_rate": 1.0,
+    "policy_compliance_rate": 1.0,
+    "unauthorized_rate": 0.0,
+    "tool_success_rate": 1.0,
+    "avg_latency_ms": 5324,
+    "avg_cost_usd": "0.002620"
+  },
+  "results": [
+    {
+      "id": "refund-auto-01",
+      "category": "refund_under_50",
+      "passed": true,
+      "policy_compliant": true,
+      "unauthorized": false,
+      "expected_intent": "refund",
+      "observed_intent": "refund",
+      "expected_action": "refund",
+      "observed_action": "refund",
+      "expected_requires_approval": false,
+      "observed_requires_approval": false,
+      "rule": "within_auto_approve_limit",
+      "reasons": [],
+      "tool_calls": 7,
+      "tool_successes": 7,
+      "latency_ms": 5324,
+      "cost_usd": "0.002620"
+    }
+  ]
+}

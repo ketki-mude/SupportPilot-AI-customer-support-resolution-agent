@@ -3,14 +3,19 @@
 import uuid
 from collections import deque
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any, TypeVar
 
+import httpx
+from fastapi import FastAPI
+from httpx import AsyncClient
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.agents.runtime import AgentEvent, EventType
+from app.core.security import Role
 from app.db.models import AgentRun, AuditLog, Message, MessageSender, Ticket
 from app.observability.cost import UsageTracker
 from app.schemas.agent import Citation, IntakeOutput, ProposedAction, ResolutionOutput
@@ -151,3 +156,30 @@ def step_trace(events: list[AgentEvent]) -> list[str]:
         else:
             labels.append(event.type.value)
     return labels
+
+
+@dataclass
+class Api:
+    """The real app over in-process HTTP, with one signed-in user per role in PEOPLE."""
+
+    app: FastAPI
+    client: AsyncClient
+    tokens: dict[str, str]
+
+    def auth(self, who: str) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.tokens[who]}"}
+
+    async def post(self, path: str, who: str, body: dict[str, Any]) -> httpx.Response:
+        return await self.client.post(f"/api{path}", json=body, headers=self.auth(who))
+
+    async def get(self, path: str, who: str, **params: Any) -> httpx.Response:
+        return await self.client.get(f"/api{path}", params=params, headers=self.auth(who))
+
+
+PEOPLE = {
+    "customer": (Role.CUSTOMER, "cus_001"),
+    "other_customer": (Role.CUSTOMER, "cus_002"),
+    "agent": (Role.AGENT, None),
+    "supervisor": (Role.SUPERVISOR, None),
+    "admin": (Role.ADMIN, None),
+}

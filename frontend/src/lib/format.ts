@@ -1,4 +1,4 @@
-import type { TicketCategory, TicketPriority, TicketStatus } from "@/lib/types";
+import type { TicketCategory, TicketPriority, TicketStatus, TicketUsage } from "@/lib/types";
 
 export function money(amount: string | number | null | undefined): string {
   if (amount === null || amount === undefined || amount === "") return "";
@@ -29,6 +29,13 @@ export function timeAgo(iso: string, now: Date = new Date()): string {
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours} h ago`;
   return shortDate(iso);
+}
+
+/** "Agent time 5.3 s · 2 runs · $0.0026" */
+export function agentUsage(usage: TicketUsage): string {
+  const seconds = (usage.latency_ms / 1000).toFixed(1);
+  const runs = `${usage.runs} ${usage.runs === 1 ? "run" : "runs"}`;
+  return `Agent time ${seconds} s · ${runs} · $${Number(usage.cost_usd).toFixed(4)}`;
 }
 
 export function percent(confidence: number): string {

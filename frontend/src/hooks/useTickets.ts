@@ -38,6 +38,7 @@ export function useCreateTicket() {
         trace: [],
         customer_context: null,
         customer_context_error: null,
+        usage: null,
       });
       void queryClient.invalidateQueries({ queryKey: ticketKeys.all });
     },

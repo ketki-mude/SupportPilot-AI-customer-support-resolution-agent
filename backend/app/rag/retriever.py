@@ -1,5 +1,7 @@
 """Find the policy sections most relevant to a question, with citations."""
 
+from collections.abc import Sequence
+
 from langchain_core.embeddings import Embeddings
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,18 +17,19 @@ async def retrieve_policies(
     *,
     top_k: int,
     min_similarity: float,
+    sources: Sequence[str] | None = None,
 ) -> list[PolicySnippet]:
     """Top-k sections by exact cosine similarity, dropping any below `min_similarity`.
 
-    Fewer than `top_k` results, or none, come back for questions the policies do not cover.
+    `sources` limits the search to those documents. Fewer than `top_k` results, or none, come
+    back for questions the policies do not cover.
     """
     vector = await embeddings.aembed_query(query)
     distance = PolicyChunk.embedding.cosine_distance(vector).label("distance")
-    rows = await session.execute(
-        select(PolicyChunk.source, PolicyChunk.section, PolicyChunk.content, distance)
-        .order_by(distance)
-        .limit(top_k)
-    )
+    statement = select(PolicyChunk.source, PolicyChunk.section, PolicyChunk.content, distance)
+    if sources is not None:
+        statement = statement.where(PolicyChunk.source.in_(sources))
+    rows = await session.execute(statement.order_by(distance).limit(top_k))
     snippets = [
         PolicySnippet(source=source, section=section, content=content, score=1 - dist)
         for source, section, content, dist in rows

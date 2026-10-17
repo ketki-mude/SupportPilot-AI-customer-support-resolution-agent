@@ -5,10 +5,13 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Annotated, Any, TypeVar
 
+from langchain_core.messages import ToolCall
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.guardrails import redact_value
 from app.agents.tools.commerce import CommerceClient
 from app.services.audit_service import AuditService, AuditStatus
 
@@ -41,6 +44,36 @@ class ToolContext:
         return f"{action}-{self.ticket_id}"
 
 
+RejectHook = Callable[[Any, ValidationError], Awaitable[None]]
+
+
+class AuditedTool(StructuredTool):
+    """A StructuredTool that also audits calls whose arguments fail validation.
+
+    Every attempted call leaves a trace, including ones blocked before they run: those are the
+    calls a manipulated model or a buggy step would make.
+    """
+
+    validator: type[BaseModel]
+    on_rejected: RejectHook
+
+    async def ainvoke(
+        self,
+        input: str | dict[str, Any] | ToolCall,
+        config: RunnableConfig | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        raw: Any = input
+        if isinstance(input, dict) and input.get("type") == "tool_call":
+            raw = input.get("args", {})
+        try:
+            self.validator.model_validate(raw)
+        except ValidationError as exc:
+            await self.on_rejected(raw, exc)
+            raise
+        return await super().ainvoke(input, config, **kwargs)
+
+
 def audited_tool(
     context: ToolContext,
     *,
@@ -49,11 +82,28 @@ def audited_tool(
     args_schema: type[ArgsT],
     handler: Callable[[ToolContext, ArgsT], Awaitable[BaseModel]],
 ) -> StructuredTool:
-    """Wrap a handler as a LangChain tool that writes an audit entry for every call it runs.
+    """Wrap a handler as a LangChain tool that writes an audit entry for every call attempted.
 
-    Arguments are validated against `args_schema` before the handler runs. Errors are recorded
-    and then re-raised unchanged so the caller can decide whether to retry or escalate.
+    Arguments are validated against `args_schema` first; a rejected call is audited as
+    `rejected_invalid` with redacted arguments. Handler errors are recorded and re-raised
+    unchanged so the caller can decide whether to retry or escalate.
     """
+
+    async def on_rejected(raw: Any, error: ValidationError) -> None:
+        await context.audit.record(
+            ticket_id=context.ticket_id,
+            action=TOOL_CALL_ACTION,
+            tool_name=name,
+            status=AuditStatus.REJECTED_INVALID,
+            input_data=redact_value(raw) if isinstance(raw, dict) else {"value": redact_value(raw)},
+            output_data={
+                "error": "validation_error",
+                "issues": [
+                    {"field": ".".join(str(p) for p in issue["loc"]), "message": issue["msg"]}
+                    for issue in error.errors()
+                ],
+            },
+        )
 
     async def run(**kwargs: Any) -> BaseModel:
         args = args_schema.model_validate(kwargs)
@@ -83,6 +133,11 @@ def audited_tool(
         )
         return result
 
-    return StructuredTool.from_function(
-        coroutine=run, name=name, description=description, args_schema=args_schema
+    return AuditedTool(
+        name=name,
+        description=description,
+        args_schema=args_schema,
+        coroutine=run,
+        validator=args_schema,
+        on_rejected=on_rejected,
     )

@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings
+from app.core.rate_limit import RateLimits
 
 BASE: dict[str, Any] = {
     "database_url": "postgresql+asyncpg://u:p@localhost/db",
@@ -67,3 +68,39 @@ def test_secrets_are_masked_in_repr() -> None:
     settings = _settings(google_api_key="AIza-very-secret")
     assert "AIza-very-secret" not in repr(settings)
     assert "s" * 32 not in repr(settings)
+
+
+def test_sessions_default_to_short_access_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ACCESS_TOKEN_EXPIRE_MINUTES", raising=False)
+    settings = _settings()
+    assert settings.access_token_expire_minutes == 15
+    assert settings.refresh_token_expire_days == 7
+
+
+def test_cors_origins_are_comma_separated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CORS_ORIGINS", "https://app.example, https://admin.example,")
+    assert _settings().cors_origins == ["https://app.example", "https://admin.example"]
+
+
+@pytest.mark.parametrize(
+    ("env", "override", "secure"),
+    [("development", None, False), ("production", None, True), ("development", True, True)],
+)
+def test_secure_cookies_follow_the_environment(
+    env: str, override: bool | None, secure: bool
+) -> None:
+    assert _settings(app_env=env, cookie_secure=override).secure_cookies is secure
+
+
+def test_rate_limits_read_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LOGIN_RATE_LIMIT_PER_MINUTE", "3")
+    monkeypatch.setenv("CHAT_RATE_LIMIT_PER_MINUTE", "4")
+    limits = RateLimits.from_settings(_settings())
+    assert limits.login.limit == 3
+    assert limits.chat.limit == 4
+    assert [limits.login.hit("a@b.co") for _ in range(4)][-1] is not None
+
+
+def test_rate_limits_must_be_positive() -> None:
+    with pytest.raises(ValidationError):
+        _settings(login_rate_limit_per_minute=0)

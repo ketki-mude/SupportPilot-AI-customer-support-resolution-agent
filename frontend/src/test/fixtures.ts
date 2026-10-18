@@ -1,4 +1,13 @@
-import type { Approval, AuditEntry, EvalReport, EvalRunSummary, Message } from "@/lib/types";
+import type {
+  ActionCheck,
+  Approval,
+  AuditEntry,
+  EvalReport,
+  EvalRunSummary,
+  Message,
+  Order,
+  Ticket,
+} from "@/lib/types";
 
 export function message(overrides: Partial<Message> = {}): Message {
   return {
@@ -138,6 +147,61 @@ export function evalReport(overrides: Partial<EvalReport> = {}): EvalReport {
         cost_usd: "0.001100",
       },
     ],
+    ...overrides,
+  };
+}
+
+export function ticket(overrides: Partial<Ticket> = {}): Ticket {
+  return {
+    id: "t1",
+    public_id: "TCK-1004",
+    customer_id: "cus_001",
+    order_id: "ORD-10002",
+    category: "refund",
+    status: "escalated",
+    priority: "high",
+    summary: "The customer's phone case set arrived cracked.",
+    customer_replied: false,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+export function order(overrides: Partial<Order> = {}): Order {
+  return {
+    order_id: "ORD-10002",
+    customer_id: "cus_001",
+    status: "delivered",
+    payment_status: "captured",
+    items: [
+      { sku: "SKU-PC-110", name: "Slim phone case", quantity: 1, unit_price: "19.99" },
+      { sku: "SKU-SP-020", name: "Tempered glass screen protector", quantity: 1, unit_price: "9.99" },
+    ],
+    total: "29.98",
+    currency: "USD",
+    placed_at: new Date().toISOString(),
+    shipped_at: null,
+    delivered_at: new Date().toISOString(),
+    estimated_delivery_at: null,
+    cancelled_at: null,
+    tracking_number: null,
+    payment_method_last4: "4242",
+    refunded_amount: "0.00",
+    remedy: null,
+    ...overrides,
+  };
+}
+
+export function actionCheck(overrides: Partial<ActionCheck> = {}): ActionCheck {
+  return {
+    action: "refund",
+    order_id: "ORD-10002",
+    verdict: "allowed",
+    rule: "within_auto_approve_limit",
+    reason: "$29.98 is within the automatic limit.",
+    amount: "29.98",
+    skus: ["SKU-PC-110", "SKU-SP-020"],
     ...overrides,
   };
 }

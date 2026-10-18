@@ -7,6 +7,15 @@ os.environ["BCRYPT_ROUNDS"] = "4"
 os.environ.setdefault("JWT_SECRET", "test-only-secret-with-at-least-32-characters")
 # Fail if a checkpoint ever holds anything but plain JSON.
 os.environ["LANGGRAPH_STRICT_MSGPACK"] = "true"
+# Tests never call a paid model and never depend on the model a developer chose in .env.
+os.environ.pop("GOOGLE_API_KEY", None)
+os.environ.pop("OPENAI_API_KEY", None)
+os.environ.pop("ANTHROPIC_API_KEY", None)
+os.environ.pop("LLM_PROVIDER", None)
+os.environ.pop("LLM_MODEL", None)
+os.environ.pop("LLM_TEMPERATURE", None)
+os.environ.pop("LLM_INPUT_USD_PER_MILLION", None)
+os.environ.pop("LLM_OUTPUT_USD_PER_MILLION", None)
 
 import asyncio
 import importlib.util
@@ -341,6 +350,10 @@ def eval_settings(database_url: str) -> Settings:
             "eval_database_url": eval_url,
             "eval_commerce_url": "http://eval-shop",
             "commerce_backoff_seconds": 0,
+            # No key at all, so an evaluation test can never reach a paid model.
+            "google_api_key": None,
+            "openai_api_key": None,
+            "anthropic_api_key": None,
         }
     )
 

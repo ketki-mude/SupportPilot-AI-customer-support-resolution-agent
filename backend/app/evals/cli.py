@@ -22,6 +22,7 @@ from app.evals.harness import (
 from app.evals.metrics import CaseResult
 from app.evals.report import (
     RunReport,
+    load_report,
     percent,
     render_markdown,
     render_readme_results,
@@ -67,6 +68,13 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--limit", type=int, metavar="N", help="Run only the first N cases")
     parser.add_argument("--dataset", type=Path, help="Default: evals/dataset/cases.jsonl")
     parser.add_argument("--yes", action="store_true", help="Skip the cost confirmation")
+    parser.add_argument(
+        "--render",
+        type=Path,
+        metavar="REPORT",
+        help="Run nothing: rewrite the Markdown report and the README results block from a "
+        "saved report file",
+    )
     docs = parser.add_mutually_exclusive_group()
     docs.add_argument(
         "--docs",
@@ -100,6 +108,19 @@ def _confirm(prompt: str) -> bool:
     return input(f"{prompt} [y/N] ").strip().lower() in {"y", "yes"}
 
 
+def render_saved(path: Path, docs_path: Path) -> int:
+    """Regenerate the documents from a saved report, for example after a template change."""
+    report = load_report(path)
+    docs_path.parent.mkdir(parents=True, exist_ok=True)
+    docs_path.write_text(render_markdown(report))
+    print(f"Markdown: {docs_path}")
+    if update_readme(report, default_readme_path()):
+        print("README results updated from this report")
+    else:
+        print("README left as is: only a complete live run of every case updates it")
+    return 0
+
+
 def gate_failures(report: RunReport, min_correct: float | None) -> list[str]:
     m = report.metrics
     failures: list[str] = []
@@ -127,6 +148,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     settings = get_settings()
     # Warnings and errors only, so the progress lines stay readable.
     configure_logging(settings.model_copy(update={"log_level": "WARNING", "log_json": False}))
+    if args.render:
+        return render_saved(args.render, args.docs or default_docs_path())
     mode: LlmMode = "mock" if args.llm == "mock" else "live"
 
     dataset = load_dataset(args.dataset or evals_dir(settings) / "dataset" / "cases.jsonl")
@@ -140,8 +163,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Cannot run a live evaluation: {exc}", file=sys.stderr)
             return EXIT_CONFIG
         estimate = estimate_cost(planned, settings)
+        sampling = (
+            f"temperature {settings.llm_temperature:g}"
+            if settings.llm_temperature is not None
+            else "the model's fixed default temperature (not 0)"
+        )
         print(
-            f"Model: {settings.llm_model} ({settings.llm_provider.value}), temperature 0\n"
+            f"Model: {settings.llm_model} ({settings.llm_provider.value}), {sampling}\n"
             f"Estimated cost: ${estimate} for {planned} cases (about {TYPICAL_INPUT_TOKENS} input "
             f"and {TYPICAL_OUTPUT_TOKENS} output tokens per case at "
             f"${settings.llm_input_usd_per_million} and ${settings.llm_output_usd_per_million} "

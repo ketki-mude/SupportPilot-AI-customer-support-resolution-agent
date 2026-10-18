@@ -23,6 +23,17 @@ AWAITING_APPROVAL_FOLLOW_UP = (
     "Thanks, I've added this to your request. A supervisor is reviewing it now, and you'll get "
     "an update right here."
 )
+ESCALATED_FOLLOW_UP = (
+    "Thanks, I've passed this on to the specialist handling your request. They'll reply here."
+)
+STAFF_CLOSED_RESOLVED = (
+    "Our support team has looked into this and closed the request. If you need anything else, "
+    "please start a new request."
+)
+STAFF_CLOSED_DECLINED = (
+    "Our support team reviewed your request and wasn't able to approve it. If you have more "
+    "details to share, please start a new request."
+)
 CLOSED_TICKET_FOLLOW_UP = (
     "Thanks for your message. This request is closed, but our support staff can see what you "
     "wrote. If it's about a different issue, please start a new request."
@@ -97,6 +108,11 @@ def escalated(state: AgentState) -> str:
             "who will follow up here."
         )
     return "I've passed your request to a specialist, who will follow up here shortly."
+
+
+def action_done(result: ActionResult, order: Order | None) -> str:
+    """What the customer is told once an action has actually been carried out."""
+    return _done(result, order)
 
 
 def _done(result: ActionResult, order: Order | None) -> str:

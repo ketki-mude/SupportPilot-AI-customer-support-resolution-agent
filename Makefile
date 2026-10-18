@@ -47,7 +47,7 @@ e2e: ## Browser test of the full approval flow on the running stack (resets the 
 		-v "$(CURDIR)/frontend:/work" -v supportpilot_e2e_node_modules:/work/node_modules -w /work \
 		$(PLAYWRIGHT_IMAGE) sh -c "npm ci --no-audit --no-fund > /dev/null && npx playwright test"
 
-eval: ## Full evaluation with the live model (needs GOOGLE_API_KEY; shows the estimated cost first). Extra flags: EVAL_ARGS="--limit 10"
+eval: ## Full evaluation with the configured live model (needs its API key; shows the estimated cost first). Extra flags: EVAL_ARGS="--limit 10"
 	$(COMPOSE) up -d --wait mock_commerce_eval
 	$(EVAL_RUN) $(EVAL_ARGS)
 

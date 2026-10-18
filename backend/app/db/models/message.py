@@ -13,6 +13,8 @@ class MessageSender(StrEnum):
     CUSTOMER = "customer"
     AGENT = "agent"
     SUPERVISOR = "supervisor"
+    # A person on the support team replying or acting on a ticket the agent handed over.
+    STAFF = "staff"
     SYSTEM = "system"
 
 

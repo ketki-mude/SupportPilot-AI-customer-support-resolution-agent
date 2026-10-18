@@ -166,7 +166,14 @@ Nodes and edges:
 7. `executor`: only runs actions that are auto-approved or have an approved approval row. Calls the refund, replacement, or cancel tool with idempotency key `refund-{ticket_id}`, `replacement-{ticket_id}`, or `cancel-{ticket_id}`. Retries transient errors with tenacity (3 attempts, exponential backoff).
 8. `notifier`: update the ticket, write the customer message, write the audit log.
 9. `escalation`: set status escalated, tell the customer a human will follow up, notify supervisors.
-Follow-up customer messages: open ticket, continue the conversation; awaiting approval, a fixed templated reply with no model call and no graph run (the message is saved for the supervisor); resolved, rejected, or escalated, save the message, do not reopen, send one templated reply, and set the ticket's `customer_replied` flag (exposed in the ticket API).
+Follow-up customer messages: open ticket, continue the conversation; awaiting approval, a fixed templated reply with no model call and no graph run (the message is saved for the supervisor); resolved, rejected, or escalated, save the message, do not reopen, send one templated reply, and set the ticket's `customer_replied` flag (exposed in the ticket API). On an escalated ticket the reply says the specialist will see it, and the customer's chat stays open for them; a staff reply clears the flag.
+
+Staff takeover (agreed after Phase 6): agents, supervisors, and admins can act on escalated or open tickets the agent is not running.
+- Reply: a `staff` message ("Support team" in the chat), on any ticket, pushed live over SSE.
+- Act: refund (whole order or chosen items), replacement, or cancel, through the agent's own audited tools and per-ticket idempotency keys, with the staff member as the audit actor. The amount always comes from the order record.
+- Every action is checked by the policy engine first. Allowed: the rules permit it (the person is the approver). Override: the rules would refuse or escalate it (over $500, outside the window, not delivered or late, a fraud flag); it needs a written reason of at least 10 characters, recorded with the rule that was overridden. Blocked for everyone: another customer's order, a second remedy on an order, an item not on the order, no order, replacing an undelivered order, cancelling one that has shipped, been delivered, or been cancelled.
+- Close without an action, as resolved or declined, with a templated message to the customer.
+- The ticket row is locked with `FOR NO KEY UPDATE` (audit inserts on other connections reference it), so of two simultaneous actions exactly one succeeds and the other gets 409.
 Any unrecoverable tool error routes to `escalation`. Persist state with the Postgres checkpointer so a paused run survives a restart. The `thread_id` is the ticket id.
 
 ## Guardrails
@@ -188,6 +195,10 @@ Any unrecoverable tool error routes to `escalation`. Persist state with the Post
 - `POST /api/approvals/{id}/decision` (supervisor only; body: decision approve or reject, optional note; resumes the graph)
 - `GET  /api/audit?ticket_id=` (agent, supervisor, admin)
 - `POST /api/evals/run`, `GET /api/evals/runs` (admin; Phase 6)
+- `POST /api/tickets/{id}/reply` (staff: message the customer; shows in their chat live)
+- `POST /api/tickets/{id}/actions/check` (staff: what the rules say about an action: allowed, override, or blocked)
+- `POST /api/tickets/{id}/actions` (staff: refund, replacement, or cancel; an override needs a written reason)
+- `POST /api/tickets/{id}/close` (staff: close without an action, as resolved or declined)
 - `GET  /api/health`
 Use consistent error responses (`{"error": {"code", "message"}}`), pagination, and OpenAPI docs.
 
@@ -205,10 +216,11 @@ Pages:
 2. `/chat` (customer): messenger-style chat. Header with the Acme mark and "Replies in seconds". Customer bubbles on the right in the accent color, agent bubbles on the left in gray. A small status badge under the latest agent message (for example "Waiting for approval"). Live agent step updates over SSE. Input bar with send button.
 3. `/console` (agent, supervisor): three panes.
    - Top bar: logo, search box with Cmd+K quick jump.
-   - Left: ticket list with a "Needs approval" filter, title, customer name, and a small priority dot.
+   - Left: ticket list with "Needs approval" and "With a specialist" filters, title, customer name, and a small priority dot.
    - Middle: an AI summary card at the top (2 to 3 lines), the conversation, then an approval bar at the bottom: refund amount, "Policy match, agent 92% sure", Reject (outline) and Approve (the single filled button). Supervisors can add an optional note.
    - Right: customer context (name, tier, order card, history).
    - Approve and Reject must call the API, update the UI optimistically, and show an inline result message.
+   - On tickets the agent handed over, a "Handle this ticket" panel replaces the approval bar: reply, choose an action (with items), see the rules' verdict, write the reason an override needs, or close without an action. The action button is the single filled button. Closed tickets keep a reply box only.
 4. `/audit`: table with time, actor, action, result badge. Filter by ticket. Export as CSV.
 5. `/evals` (admin, Phase 6): four metric cards, a bar list of accuracy by category, and a "Run evaluation" button.
 Handle loading, empty, and error states on every page.
@@ -218,7 +230,7 @@ Handle loading, empty, and error states on every page.
 Metrics: correct resolution rate, policy compliance rate, unauthorized-action rate (target exactly 0), tool-call success rate, average latency, average cost per ticket. Write results to `evals/reports/` and `docs/eval-report.md`. Never fabricate numbers; the README must only quote results from real runs.
 Phase 6 rules (agreed):
 - Isolation: every run recreates its own `<db>_eval` database (refusing any other name), and every case resets the dedicated `mock_commerce_eval` shop to its own fixture and faults. Evaluations never touch the demo tickets or the demo shop.
-- Reproducibility: temperature 0; every report records model, provider, UTC date, git commit (with `-dirty` for uncommitted changes), and the dataset's sha256.
+- Reproducibility: temperature 0 (`LLM_TEMPERATURE`); every report records model, provider, the temperature used, UTC date, git commit (with `-dirty` for uncommitted changes), and the dataset's sha256. Exception: models that reject any temperature but their own (OpenAI reasoning models such as gpt-6-luna) run with `LLM_TEMPERATURE=default`, and the report says so.
 - Cost and quota: `--limit N`; rate-limit errors are retried with backoff; a daily-quota error stops the run, leaves the affected case unscored, and marks the report incomplete. The estimated cost is printed before a live run and the actual cost after it.
 - CI never calls a model: the 10-case smoke run uses an offline keyword stand-in and must pass all ten with zero unauthorized actions. The full live run is the manual `make eval` (needs `GOOGLE_API_KEY`).
 - Honest reporting: reports list every failed case with reasons; percentages are truncated, never rounded up; effects are read back from the shop, not from the agent. The README's results block is generated from a complete, full-dataset live report and is never edited by hand.

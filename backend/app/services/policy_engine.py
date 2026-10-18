@@ -184,6 +184,17 @@ def days_since(moment: datetime, now: datetime) -> int:
     return (now.astimezone(UTC).date() - moment.astimezone(UTC).date()).days
 
 
+def remedy_value(order: Order, skus: list[str]) -> tuple[Decimal, list[str]] | None:
+    """What a refund or replacement of these items is worth, from the order record.
+
+    Empty `skus` means the whole order. None if the request names an item not on the order.
+    """
+    items = _select_items(order, skus)
+    if items is None:
+        return None
+    return sum((item.line_total for item in items), Decimal("0.00")), [item.sku for item in items]
+
+
 def _select_items(order: Order, skus: list[str]) -> list[OrderItem] | None:
     """The items a request covers, or None if it names an item not on the order."""
     if not skus:

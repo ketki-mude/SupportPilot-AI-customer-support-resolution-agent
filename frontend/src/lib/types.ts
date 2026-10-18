@@ -41,7 +41,7 @@ export interface Ticket {
   customer_name?: string | null;
 }
 
-export type Sender = "customer" | "agent" | "supervisor" | "system";
+export type Sender = "customer" | "agent" | "supervisor" | "staff" | "system";
 
 export interface Message {
   id: string;
@@ -218,7 +218,8 @@ export interface EvalRunSummary {
   llm_mode: "live" | "mock";
   provider: string;
   model: string;
-  temperature: number;
+  /** null: the model's fixed default (or no sampling, for the offline stand-in). */
+  temperature: number | null;
   git_commit: string;
   dataset: { path: string; sha256: string; cases: number };
   limit: number | null;
@@ -273,4 +274,32 @@ export interface EvalOverview {
   dataset_cases: number;
   model: string;
   full_run_estimate_usd: string;
+}
+
+export type StaffActionKind = "refund" | "replacement" | "cancel";
+
+export interface StaffActionInput {
+  action: StaffActionKind;
+  order_id?: string | null;
+  /** Items to refund or replace; empty means the whole order. */
+  skus: string[];
+}
+
+/** What the business rules say about an action before staff take it. */
+export interface ActionCheck {
+  action: StaffActionKind;
+  order_id: string | null;
+  verdict: "allowed" | "override" | "blocked";
+  rule: string;
+  reason: string;
+  amount: string | null;
+  skus: string[];
+}
+
+export interface StaffActionResult {
+  ticket: Ticket;
+  message: Message;
+  check: ActionCheck;
+  reference: string | null;
+  amount: string | null;
 }

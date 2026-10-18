@@ -19,10 +19,12 @@ function setup(
     steps: StepState[];
     running: boolean;
     sending: boolean;
+    closed: boolean;
     onSend: (text: string) => Promise<unknown>;
   }> = {},
 ) {
   const onSend = props.onSend ?? vi.fn().mockResolvedValue(undefined);
+  const onStartNew = vi.fn();
   const view = render(
     <ChatWindow
       header={<header>Acme support</header>}
@@ -32,9 +34,11 @@ function setup(
       running={props.running ?? false}
       sending={props.sending ?? false}
       onSend={onSend}
+      closed={props.closed ?? false}
+      onStartNew={onStartNew}
     />,
   );
-  return { onSend, ...view };
+  return { onSend, onStartNew, ...view };
 }
 
 describe("ChatWindow", () => {
@@ -96,5 +100,35 @@ describe("ChatWindow", () => {
   it("shows no status badge on an open ticket", () => {
     setup({ status: "open" });
     expect(screen.queryByTestId("latest-status")).not.toBeInTheDocument();
+  });
+
+  it("offers a new request, not the message box, once a request is closed", async () => {
+    const { onStartNew, container } = setup({ status: "resolved", closed: true });
+    expect(screen.queryByLabelText("Message")).not.toBeInTheDocument();
+    expect(screen.getByText("This request is closed. The assistant won't reply to it again.")).toBeInTheDocument();
+    const primary = container.querySelectorAll('[data-variant="primary"]');
+    expect(primary).toHaveLength(1);
+    expect(primary[0]).toHaveTextContent("Start a new request");
+    await userEvent.click(screen.getByRole("button", { name: "Start a new request" }));
+    expect(onStartNew).toHaveBeenCalledTimes(1);
+  });
+
+  it("still lets the customer add a note to a closed request", async () => {
+    const { onSend } = setup({ status: "resolved", closed: true });
+    await userEvent.click(screen.getByRole("button", { name: "Add a note to this request" }));
+    expect(screen.getByText("Your note goes to our support staff. It won't reopen this request.")).toBeInTheDocument();
+    const box = screen.getByLabelText("Message");
+    expect(box).toHaveFocus();
+    await userEvent.type(box, "Thanks, all sorted{Enter}");
+    expect(onSend).toHaveBeenCalledWith("Thanks, all sorted");
+  });
+
+  it("labels messages from a person on the support team", () => {
+    setup({
+      messages: [...CONVERSATION, message({ id: "m3", sender: "staff", content: "Could you send a photo?" })],
+      status: "escalated",
+    });
+    expect(screen.getByText("Support team")).toBeInTheDocument();
+    expect(screen.queryByText("Acme assistant")).not.toBeInTheDocument();
   });
 });

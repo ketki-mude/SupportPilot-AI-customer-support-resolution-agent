@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     llm_provider: LLMProvider = LLMProvider.GEMINI
     llm_model: str = "gemini-2.5-flash"
     llm_timeout_seconds: float = Field(default=30, gt=0, le=300)
+    # 0 for repeatable output. "default" sends none, for models that accept only their own
+    # (OpenAI's reasoning models); evaluation reports record which one was used.
+    llm_temperature: float | None = Field(default=0, ge=0, le=2)
     # USD per million tokens for the configured model; output includes any thinking tokens.
     llm_input_usd_per_million: Decimal = Field(default=Decimal("0.30"), ge=0)
     llm_output_usd_per_million: Decimal = Field(default=Decimal("2.50"), ge=0)
@@ -98,6 +101,13 @@ class Settings(BaseSettings):
     seed_agent_password: SecretStr | None = None
     seed_supervisor_password: SecretStr | None = None
     seed_admin_password: SecretStr | None = None
+
+    @field_validator("llm_temperature", mode="before")
+    @classmethod
+    def _provider_default_temperature(cls, value: object) -> object:
+        if isinstance(value, str) and value.strip().lower() == "default":
+            return None
+        return value
 
     @field_validator("cors_origins", mode="before")
     @classmethod

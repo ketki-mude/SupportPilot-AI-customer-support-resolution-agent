@@ -10,7 +10,7 @@ from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.config import Settings
 from app.evals.dataset import Dataset
@@ -35,7 +35,7 @@ class RunSummary(BaseModel):
     llm_mode: Literal["live", "mock"]
     provider: str
     model: str
-    temperature: float
+    temperature: float | None = Field(description="None: the model's fixed default")
     git_commit: str
     dataset: DatasetInfo
     limit: int | None
@@ -74,7 +74,7 @@ class RunReport(RunSummary):
             llm_mode=mode,
             provider=settings.llm_provider.value if live else "none",
             model=settings.llm_model if live else "keyword stand-in (no model)",
-            temperature=0.0,
+            temperature=settings.llm_temperature if live else None,
             git_commit=settings.eval_git_commit,
             dataset=DatasetInfo(
                 path=Path(dataset.path).name, sha256=dataset.sha256, cases=len(dataset.cases)
@@ -120,6 +120,14 @@ def list_summaries(directory: Path) -> list[RunSummary]:
     return summaries
 
 
+def temperature_label(report: RunSummary) -> str:
+    if report.llm_mode == "mock":
+        return "no sampling (keyword rules)"
+    if report.temperature is None:
+        return "its fixed default temperature (the model accepts no other)"
+    return f"temperature {report.temperature:g}"
+
+
 def percent(part: int, whole: int) -> str:
     """`part/whole` as a percentage with one decimal, truncated (97.49 shows as 97.4%)."""
     if whole == 0:
@@ -143,7 +151,7 @@ def render_markdown(report: RunReport) -> str:
         "| | |",
         "| --- | --- |",
         f"| Date (UTC) | {report.started_at.astimezone(UTC):%Y-%m-%d %H:%M} |",
-        f"| Model | {report.model} ({report.provider}), temperature {report.temperature:g} |",
+        f"| Model | {report.model} ({report.provider}), {temperature_label(report)} |",
         f"| Git commit | `{report.git_commit}` |",
         f"| Dataset | `{report.dataset.path}`, {report.dataset.cases} cases, "
         f"sha256 `{report.dataset.sha256[:12]}` |",
@@ -235,7 +243,7 @@ def render_readme_results(report: RunReport) -> str:
     return "\n".join(
         [
             f"Full live run on {report.started_at.astimezone(UTC):%Y-%m-%d} with {report.model} "
-            f"(temperature {report.temperature:g}), commit `{report.git_commit}`, "
+            f"at {temperature_label(report)}, commit `{report.git_commit}`, "
             f"{report.cases_scored} cases. Generated from "
             f"[`evals/reports/{report.id}.json`](evals/reports/{report.id}.json); the "
             "[full report](docs/eval-report.md) lists every failed case with its reasons.",

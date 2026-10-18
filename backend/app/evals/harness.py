@@ -84,7 +84,7 @@ def eval_database_url(settings: Settings) -> str:
 
 
 def build_llm(mode: LlmMode, settings: Settings) -> StructuredGenerator:
-    """The configured model (temperature 0) with quota backoff, or the offline stand-in."""
+    """The configured model with quota backoff, or the offline stand-in."""
     if mode == "mock":
         return KeywordLLM()
     return RetryingLLM(StructuredLLM(partial(create_chat_model, settings)))

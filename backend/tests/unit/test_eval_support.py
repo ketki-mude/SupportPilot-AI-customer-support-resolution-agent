@@ -12,7 +12,7 @@ from app.agents.prompts import intake_messages, resolution_messages
 from app.agents.state import AgentState, ChatTurn
 from app.core.config import get_settings
 from app.db.models import MessageSender, TicketCategory
-from app.evals.cli import gate_failures, parse_args, update_readme
+from app.evals.cli import gate_failures, parse_args, render_saved, update_readme
 from app.evals.dataset import EvalCase, load_dataset
 from app.evals.harness import estimate_cost, eval_database_url, evals_dir
 from app.evals.metrics import aggregate, score
@@ -156,7 +156,7 @@ def test_report_records_provenance_and_failures(tmp_path: Path) -> None:
     report = _report()
     assert report.id == "20261017T093000Z-live"
     assert report.git_commit == "abc1234"
-    assert report.temperature == 0
+    assert report.temperature == get_settings().llm_temperature
     assert report.complete
     markdown = render_markdown(report)
     assert "| Correct resolution | 50.0% | 1 of 2 cases |" in markdown
@@ -191,6 +191,28 @@ def test_mock_reports_name_no_model() -> None:
     report = _report(mode="mock", estimated_cost_usd=Decimal(0))
     assert report.model == "keyword stand-in (no model)"
     assert report.provider == "none"
+    assert report.temperature is None
+    assert "no sampling (keyword rules)" in render_markdown(report)
+
+
+def test_reports_say_when_the_model_fixes_its_own_temperature() -> None:
+    settings = get_settings().model_copy(update={"llm_temperature": None})
+    report = _report(settings=settings)
+    assert report.temperature is None
+    assert "its fixed default temperature (the model accepts no other)" in render_markdown(report)
+
+
+def test_documents_can_be_rendered_from_a_saved_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved = _report().save(tmp_path)
+    readme = tmp_path / "README.md"
+    readme.write_text(f"{README_START}\nold\n{README_END}\n")
+    monkeypatch.setattr("app.evals.cli.default_readme_path", lambda: readme)
+    docs = tmp_path / "docs" / "eval-report.md"
+    assert render_saved(saved, docs) == 0
+    assert "## Failed cases (1)" in docs.read_text()
+    assert "old" not in readme.read_text()
 
 
 # --- Command line and helpers

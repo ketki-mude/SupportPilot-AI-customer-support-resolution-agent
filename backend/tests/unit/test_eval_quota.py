@@ -48,6 +48,8 @@ def test_rate_limit_detection() -> None:
     assert is_rate_limited(LLMError("You exceeded your current quota"))
     assert not is_rate_limited(LLMError("The model did not return a valid IntakeOutput"))
     assert suggested_delay(RATE_LIMITED) == 7.0
+    assert suggested_delay(LLMError("429 Rate limit reached. Please try again in 20s.")) == 20.0
+    assert suggested_delay(LLMError("429 Please try again in 650ms.")) == 0.65
     assert suggested_delay(LLMError("429")) is None
 
 
@@ -75,6 +77,16 @@ async def test_daily_quota_stops_instead_of_waiting() -> None:
         await _generate(llm)
     assert sleeps.waits == []
     assert llm.exhausted == "Model quota exhausted; the provider asks to wait 28853s"
+
+
+async def test_an_account_without_credit_stops_at_once() -> None:
+    sleeps = Sleeps()
+    no_credit = LLMError("429 You exceeded your current quota. 'code': 'insufficient_quota'")
+    llm = RetryingLLM(Flaky(no_credit), sleep=sleeps)
+    with pytest.raises(LLMError):
+        await _generate(llm)
+    assert sleeps.waits == []
+    assert llm.exhausted == "The model account has no credit left (insufficient_quota)"
 
 
 async def test_persistent_limits_stop_after_the_last_retry() -> None:

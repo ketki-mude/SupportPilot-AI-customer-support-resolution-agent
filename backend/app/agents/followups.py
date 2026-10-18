@@ -4,7 +4,8 @@
 - awaiting approval: a fixed reply; no model call and no agent run. The message stays on the
   ticket for the supervisor reviewing it.
 - resolved, rejected, or escalated: the ticket is not reopened. The message is saved, the ticket
-  is flagged `customer_replied` for staff, and a fixed reply is sent once.
+  is flagged `customer_replied` for staff, and a fixed reply is sent once (until staff answer).
+  On an escalated ticket that reply says the specialist will see it.
 """
 
 from dataclasses import dataclass
@@ -47,10 +48,13 @@ async def receive_follow_up(session: AsyncSession, ticket: Ticket, content: str)
 
     first_since_closed = not ticket.customer_replied
     ticket.customer_replied = True
+    text = (
+        replies.ESCALATED_FOLLOW_UP
+        if ticket.status is TicketStatus.ESCALATED
+        else replies.CLOSED_TICKET_FOLLOW_UP
+    )
     closed_reply = (
-        await ticket_service.add_message(
-            session, ticket.id, MessageSender.AGENT, replies.CLOSED_TICKET_FOLLOW_UP
-        )
+        await ticket_service.add_message(session, ticket.id, MessageSender.AGENT, text)
         if first_since_closed
         else None
     )

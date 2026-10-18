@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { categoryName, categoryRows, estimateFor, exactUsd, seconds, truncatedPercent } from "@/lib/evals";
+import {
+  categoryName,
+  categoryRows,
+  estimateFor,
+  exactUsd,
+  seconds,
+  temperatureLabel,
+  truncatedPercent,
+} from "@/lib/evals";
 import { evalSummary } from "@/test/fixtures";
 
 describe("evaluation formatting", () => {
@@ -23,6 +31,12 @@ describe("evaluation formatting", () => {
   it("truncates latency to a tenth of a second", () => {
     expect(seconds(8199)).toBe("8.1 s");
     expect(seconds(0)).toBe("0.0 s");
+  });
+
+  it("says how a run sampled", () => {
+    expect(temperatureLabel({ llm_mode: "live", temperature: 0 })).toBe("temperature 0");
+    expect(temperatureLabel({ llm_mode: "live", temperature: null })).toBe("model's fixed default temperature");
+    expect(temperatureLabel({ llm_mode: "mock", temperature: null })).toBe("no sampling");
   });
 
   it("scales the full-run estimate to the chosen size", () => {

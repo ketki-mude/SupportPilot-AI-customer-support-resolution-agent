@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.guardrails import redact_value
 from app.agents.tools.commerce import CommerceClient
-from app.services.audit_service import AuditService, AuditStatus
+from app.services.audit_service import AGENT_ACTOR, AuditService, AuditStatus
 
 ArgsT = TypeVar("ArgsT", bound=BaseModel)
 
@@ -38,6 +38,8 @@ class ToolContext:
     session: AsyncSession
     commerce: CommerceClient
     audit: AuditService
+    # Who the audit log names for each call: the agent, or the staff member acting by hand.
+    actor: str = AGENT_ACTOR
 
     def idempotency_key(self, action: str) -> str:
         """Stable per ticket, so retries and repeated approvals never act twice."""
@@ -92,6 +94,7 @@ def audited_tool(
     async def on_rejected(raw: Any, error: ValidationError) -> None:
         await context.audit.record(
             ticket_id=context.ticket_id,
+            actor=context.actor,
             action=TOOL_CALL_ACTION,
             tool_name=name,
             status=AuditStatus.REJECTED_INVALID,
@@ -112,6 +115,7 @@ def audited_tool(
         except Exception as exc:
             await context.audit.record(
                 ticket_id=context.ticket_id,
+                actor=context.actor,
                 action=TOOL_CALL_ACTION,
                 tool_name=name,
                 status=AuditStatus.FAILURE,
@@ -125,6 +129,7 @@ def audited_tool(
             raise
         await context.audit.record(
             ticket_id=context.ticket_id,
+            actor=context.actor,
             action=TOOL_CALL_ACTION,
             tool_name=name,
             status=AuditStatus.SUCCESS,

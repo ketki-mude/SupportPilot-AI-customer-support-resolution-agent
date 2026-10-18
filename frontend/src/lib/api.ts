@@ -1,12 +1,16 @@
 import type {
   Approval,
   AuditEntry,
+  ActionCheck,
   ChatResponse,
   EvalJob,
   EvalLlm,
   EvalOverview,
   EvalReport,
+  Message,
   Page,
+  StaffActionInput,
+  StaffActionResult,
   Ticket,
   TicketDetail,
   TicketStatus,
@@ -134,6 +138,15 @@ export const api = {
       decision,
       note: note?.trim() ? note.trim() : null,
     }),
+
+  staffReply: (ticketId: string, message: string) =>
+    request<Message>("POST", `/tickets/${ticketId}/reply`, { message }),
+  checkStaffAction: (ticketId: string, input: StaffActionInput) =>
+    request<ActionCheck>("POST", `/tickets/${ticketId}/actions/check`, input),
+  takeStaffAction: (ticketId: string, input: StaffActionInput & { note: string | null }) =>
+    request<StaffActionResult>("POST", `/tickets/${ticketId}/actions`, input),
+  closeTicket: (ticketId: string, outcome: "resolved" | "declined", note: string | null) =>
+    request<Ticket>("POST", `/tickets/${ticketId}/close`, { outcome, note }),
 
   listAudit: (query: { ticket_id?: string; page?: number; page_size?: number } = {}) =>
     request<Page<AuditEntry>>("GET", withQuery("/audit", query)),

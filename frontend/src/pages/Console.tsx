@@ -5,6 +5,7 @@ import { Link, useParams } from "react-router-dom";
 import { AgentTrace } from "@/components/AgentTrace";
 import { AiSummary } from "@/components/AiSummary";
 import { ApprovalBar, type DecisionResult } from "@/components/ApprovalBar";
+import { StaffActions } from "@/components/StaffActions";
 import { CustomerPanel } from "@/components/CustomerPanel";
 import { MessageBubble } from "@/components/MessageBubble";
 import { QuickJump, useQuickJumpShortcut } from "@/components/QuickJump";
@@ -18,10 +19,31 @@ import { useDecision } from "@/hooks/useApprovals";
 import { useTicket, useTicketList } from "@/hooks/useTickets";
 import { DECIDER_ROLES, useAuth } from "@/lib/auth";
 import { dateTime, sentence, stepName } from "@/lib/format";
-import type { AuditEntry, TicketDetail } from "@/lib/types";
+import type { AuditEntry, TicketDetail, TicketStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-type Filter = "all" | "approval";
+type Filter = "all" | "approval" | "escalated";
+
+const FILTERS: Record<Filter, { label: string; empty: string; detail?: string }> = {
+  all: { label: "All tickets", empty: "No tickets yet" },
+  approval: {
+    label: "Needs approval",
+    empty: "Nothing needs approval",
+    detail: "New approvals appear here automatically.",
+  },
+  escalated: {
+    label: "With a specialist",
+    empty: "Nothing is waiting for a specialist",
+    detail: "Tickets the agent hands over appear here.",
+  },
+};
+const FILTER_ORDER: Filter[] = ["all", "approval", "escalated"];
+const STATUS_FOR: Record<Filter, TicketStatus | undefined> = {
+  all: undefined,
+  approval: "awaiting_approval",
+  escalated: "escalated",
+};
+const HANDLED_BY_STAFF: TicketStatus[] = ["escalated", "open"];
 
 export default function Console() {
   const { ticketId = null } = useParams();
@@ -30,10 +52,8 @@ export default function Console() {
   const openSearch = useCallback(() => setSearchOpen(true), []);
   useQuickJumpShortcut(openSearch);
 
-  const list = useTicketList(
-    { status: filter === "approval" ? "awaiting_approval" : undefined, page_size: 50 },
-    { refetchInterval: 5_000 },
-  );
+  const list = useTicketList({ status: STATUS_FOR[filter], page_size: 50 }, { refetchInterval: 5_000 });
+  const current = FILTERS[filter];
 
   return (
     <StaffShell onOpenSearch={openSearch}>
@@ -46,8 +66,8 @@ export default function Console() {
           )}
           aria-label="Ticket queue"
         >
-          <div className="flex gap-1 border-b-hairline border-border p-2" role="group" aria-label="Filter">
-            {(["all", "approval"] as const).map((value) => (
+          <div className="flex flex-wrap gap-1 border-b-hairline border-border p-2" role="group" aria-label="Filter">
+            {FILTER_ORDER.map((value) => (
               <Button
                 key={value}
                 variant="ghost"
@@ -56,7 +76,7 @@ export default function Console() {
                 className={cn(filter === value && "bg-muted text-foreground")}
                 onClick={() => setFilter(value)}
               >
-                {value === "all" ? "All tickets" : "Needs approval"}
+                {FILTERS[value].label}
               </Button>
             ))}
           </div>
@@ -66,11 +86,7 @@ export default function Console() {
             ) : list.isError ? (
               <StateMessage kind="error" title="Tickets didn't load" onRetry={() => void list.refetch()} />
             ) : list.data.items.length === 0 ? (
-              <StateMessage
-                kind="empty"
-                title={filter === "approval" ? "Nothing needs approval" : "No tickets yet"}
-                detail={filter === "approval" ? "New approvals appear here automatically." : undefined}
-              />
+              <StateMessage kind="empty" title={current.empty} detail={current.detail} />
             ) : (
               <TicketList tickets={list.data.items} selectedId={ticketId} />
             )}
@@ -171,7 +187,16 @@ function TicketWorkspace({ ticketId }: { ticketId: string }) {
               onDecide={onDecide}
             />
           </div>
-        ) : null}
+        ) : (
+          <div className="max-h-[55%] overflow-y-auto border-t-hairline border-border p-4">
+            <StaffActions
+              ticket={data.ticket}
+              order={data.customer_context?.order ?? null}
+              mode={HANDLED_BY_STAFF.includes(data.ticket.status) ? "handle" : "reply"}
+              busy={stream.running}
+            />
+          </div>
+        )}
       </section>
       <aside className="hidden min-h-0 overflow-y-auto border-l-hairline border-border bg-surface xl:block" aria-label="Customer">
         <CustomerPanel context={data.customer_context} error={data.customer_context_error} />
@@ -180,7 +205,7 @@ function TicketWorkspace({ ticketId }: { ticketId: string }) {
   );
 }
 
-const TRACE_ACTIONS = new Set(["policy_decision", "approval_requested", "approval_decision", "escalated", "injection_suspected", "action_blocked", "run_failed"]);
+const TRACE_ACTIONS = new Set(["policy_decision", "approval_requested", "approval_decision", "escalated", "injection_suspected", "action_blocked", "run_failed", "staff_action", "staff_close"]);
 
 /** The key agent decisions for this ticket, from the audit trail. */
 function TraceDetails({ trace }: { trace: AuditEntry[] }) {

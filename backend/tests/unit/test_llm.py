@@ -105,11 +105,26 @@ def test_factory_builds_the_configured_provider(
     provider: LLMProvider, key_field: str, class_name: str
 ) -> None:
     settings = _settings(
-        llm_provider=provider, llm_model="some-model", **{key_field: SecretStr("k")}
+        llm_provider=provider,
+        llm_model="some-model",
+        llm_temperature=0,
+        **{key_field: SecretStr("k")},
     )
     model = create_chat_model(settings)
     assert type(model).__name__ == class_name
     assert model.temperature == 0  # type: ignore[attr-defined]
+
+
+def test_temperature_can_be_left_to_the_model() -> None:
+    """Reasoning models reject any temperature but their own, so none is sent."""
+    settings = _settings(
+        llm_provider=LLMProvider.OPENAI,
+        llm_model="gpt-6-luna",
+        llm_temperature=None,
+        openai_api_key=SecretStr("k"),
+    )
+    model = create_chat_model(settings)
+    assert model.temperature is None  # type: ignore[attr-defined]
 
 
 @pytest.mark.parametrize(

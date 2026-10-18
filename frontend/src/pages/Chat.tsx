@@ -10,7 +10,8 @@ import { useCreateTicket, useSendMessage, useTicket, useTicketList } from "@/hoo
 import { useAuth } from "@/lib/auth";
 import type { TicketStatus } from "@/lib/types";
 
-const CLOSED: TicketStatus[] = ["resolved", "rejected", "escalated"];
+// Escalated tickets stay open to the customer: a specialist reads and answers them here.
+const CLOSED: TicketStatus[] = ["resolved", "rejected"];
 
 export default function Chat() {
   const { logout } = useAuth();
@@ -89,6 +90,8 @@ export default function Chat() {
   return (
     <Shell>
       <ChatWindow
+        // A different ticket gets a fresh composer (and a fresh "add a note" choice).
+        key={activeId ?? "new"}
         header={header}
         messages={detail.data?.messages ?? []}
         status={ticket?.status ?? null}
@@ -97,11 +100,13 @@ export default function Chat() {
         onSend={onSend}
         sending={create.isPending || send.isPending}
         error={sendError ? sendError.message : null}
+        closed={ticket !== null && CLOSED.includes(ticket.status)}
         notice={
-          ticket && CLOSED.includes(ticket.status)
-            ? "This request is closed. For a different issue, start a new request."
+          ticket?.status === "escalated"
+            ? "A specialist is handling this request and will reply here."
             : null
         }
+        onStartNew={startNewRequest}
         emptyState={
           <div className="flex flex-col items-center gap-1 py-16 text-center">
             <p className="text-base font-semibold">How can we help today?</p>

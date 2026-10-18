@@ -1,4 +1,4 @@
-import type { EvalMetrics } from "@/lib/types";
+import type { EvalMetrics, EvalRunSummary } from "@/lib/types";
 
 /**
  * `part` of `whole` as a percentage with one decimal, truncated like the backend report
@@ -49,6 +49,12 @@ export function categoryRows(metrics: EvalMetrics): CategoryRow[] {
   return Object.entries(metrics.by_category)
     .map(([category, score]) => ({ category, name: categoryName(category), ...score }))
     .sort((a, b) => b.passed * a.cases - a.passed * b.cases || a.name.localeCompare(b.name));
+}
+
+/** How the run sampled, in words. */
+export function temperatureLabel(run: Pick<EvalRunSummary, "llm_mode" | "temperature">): string {
+  if (run.llm_mode === "mock") return "no sampling";
+  return run.temperature === null ? "model's fixed default temperature" : `temperature ${run.temperature}`;
 }
 
 /** "9.8 s" from milliseconds, truncated to one decimal. */

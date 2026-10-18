@@ -92,6 +92,19 @@ def test_secure_cookies_follow_the_environment(
     assert _settings(app_env=env, cookie_secure=override).secure_cookies is secure
 
 
+@pytest.mark.parametrize(("value", "expected"), [("0", 0.0), ("0.2", 0.2), ("default", None)])
+def test_temperature_reads_from_environment(
+    monkeypatch: pytest.MonkeyPatch, value: str, expected: float | None
+) -> None:
+    monkeypatch.setenv("LLM_TEMPERATURE", value)
+    assert _settings().llm_temperature == expected
+
+
+def test_temperature_defaults_to_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LLM_TEMPERATURE", raising=False)
+    assert _settings().llm_temperature == 0
+
+
 def test_rate_limits_read_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LOGIN_RATE_LIMIT_PER_MINUTE", "3")
     monkeypatch.setenv("CHAT_RATE_LIMIT_PER_MINUTE", "4")

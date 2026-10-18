@@ -22,7 +22,11 @@ logger = structlog.get_logger(__name__)
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
 _RATE_LIMITED = re.compile(r"\b429\b|RESOURCE_EXHAUSTED|rate limit|quota", re.IGNORECASE)
+# Gemini: retryDelay: '7s'. OpenAI: "Please try again in 20s" or "in 650ms".
 _RETRY_DELAY = re.compile(r"retry_?delay'?\"?:\s*'?\"?(\d+(?:\.\d+)?)s", re.IGNORECASE)
+_TRY_AGAIN = re.compile(r"try again in (\d+(?:\.\d+)?)(ms|s)\b", re.IGNORECASE)
+# Out of credit or billing: waiting does not help.
+_NO_CREDIT = re.compile(r"insufficient_quota|billing", re.IGNORECASE)
 
 
 def is_rate_limited(error: Exception) -> bool:
@@ -31,8 +35,13 @@ def is_rate_limited(error: Exception) -> bool:
 
 def suggested_delay(error: Exception) -> float | None:
     """The provider's own retry hint, when the error carries one."""
-    found = _RETRY_DELAY.search(str(error))
-    return float(found.group(1)) if found else None
+    text = str(error)
+    if found := _RETRY_DELAY.search(text):
+        return float(found.group(1))
+    if found := _TRY_AGAIN.search(text):
+        seconds = float(found.group(1))
+        return seconds / 1000 if found.group(2).lower() == "ms" else seconds
+    return None
 
 
 class RetryingLLM:
@@ -63,6 +72,9 @@ class RetryingLLM:
                 return await self._inner.generate(schema, messages, usage)
             except LLMError as exc:
                 if not is_rate_limited(exc):
+                    raise
+                if _NO_CREDIT.search(str(exc)):
+                    self.exhausted = "The model account has no credit left (insufficient_quota)"
                     raise
                 if attempt == self._max_retries:
                     self.exhausted = f"Model still rate limited after {attempt} retries"

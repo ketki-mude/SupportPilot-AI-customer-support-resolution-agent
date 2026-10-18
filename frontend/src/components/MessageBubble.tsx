@@ -12,6 +12,7 @@ const SENDER_LABEL: Record<Message["sender"], string> = {
   customer: "Customer",
   agent: "Acme assistant",
   supervisor: "Supervisor",
+  staff: "Support team",
   system: "System",
 };
 
@@ -21,7 +22,8 @@ export function MessageBubble({ message, perspective }: MessageBubbleProps) {
   const pending = message.id.startsWith("pending-");
   return (
     <div className={cn("flex flex-col gap-1", mine ? "items-end" : "items-start")}>
-      {perspective === "staff" ? (
+      {/* Customers see who wrote only when a person did, so a staff reply never passes as the bot. */}
+      {perspective === "staff" || message.sender === "staff" ? (
         <span className="px-1 text-xs text-subtle">{SENDER_LABEL[message.sender]}</span>
       ) : null}
       <div

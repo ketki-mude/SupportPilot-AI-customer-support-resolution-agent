@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from functools import cached_property
-from typing import Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 import structlog
 from langchain_core.language_models import BaseChatModel
@@ -36,8 +36,10 @@ class StructuredGenerator(Protocol):
 
 
 def create_chat_model(settings: Settings) -> BaseChatModel:
-    """Build the chat model for LLM_PROVIDER with deterministic sampling."""
-    common = {"temperature": 0, "timeout": settings.llm_timeout_seconds, "max_retries": 2}
+    """Build the chat model for LLM_PROVIDER, at temperature 0 unless configured otherwise."""
+    common: dict[str, Any] = {"timeout": settings.llm_timeout_seconds, "max_retries": 2}
+    if settings.llm_temperature is not None:
+        common["temperature"] = settings.llm_temperature
     match settings.llm_provider:
         case LLMProvider.GEMINI:
             from langchain_google_genai import ChatGoogleGenerativeAI

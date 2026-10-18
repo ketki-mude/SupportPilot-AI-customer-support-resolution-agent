@@ -100,6 +100,26 @@ sequenceDiagram
     G-->>C: "I've refunded $79.99 to your card ending 4242 for order ORD-10001" (SSE)
 ```
 
+## When the agent hands over
+
+Escalated tickets (and open ones the agent is not running) get a "Handle this ticket" panel in
+the console. A staff member can reply, act, or close:
+
+```mermaid
+flowchart LR
+    pick["Refund / replacement / cancel<br/>(items optional)"] --> check["policy_engine.evaluate<br/>plus hard limits"]
+    check -- allowed --> act
+    check -- "override<br/>(over $500, outside window,<br/>not delivered, fraud flag)" --> reason{"written reason<br/>at least 10 characters?"}
+    reason -- yes --> act["agent's audited tools<br/>same idempotency keys<br/>actor = staff member"]
+    reason -- no --> refuse422["422: reason required"]
+    check -- "blocked<br/>(other customer, second remedy,<br/>unknown item, shop can't)" --> refuse409["409: never allowed"]
+    act --> done["ticket resolved, staff message,<br/>live event to the customer"]
+```
+
+The ticket row is locked with `FOR NO KEY UPDATE` while a person acts, so two simultaneous
+actions cannot both run. `FOR UPDATE` would also block the audit inserts that reference the row
+from other connections.
+
 ## Evaluation harness
 
 ```mermaid
@@ -120,8 +140,9 @@ flowchart LR
   an action counts even if the agent's own record of it were wrong.
 - With `--llm mock`, a keyword stand-in replaces the model. CI uses it on the first ten cases to
   check the wiring without calling a paid model; it says nothing about model quality.
-- The live model runs at temperature 0. Per-minute rate limits are waited out; a daily quota
-  stops the run and the report is marked incomplete.
+- The live model runs at temperature 0 unless it accepts only its own default (reasoning
+  models); the report records which. Per-minute rate limits are waited out; a daily quota or an
+  account without credit stops the run, and the report is marked incomplete.
 
 ## Data model
 

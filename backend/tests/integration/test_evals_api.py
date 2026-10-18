@@ -26,7 +26,7 @@ def jobs(
     """Jobs on the in-process shop, saving reports under a temporary evals folder."""
     (tmp_path / "dataset").mkdir()
     shutil.copy(evals_dir(eval_settings) / "dataset" / "cases.jsonl", tmp_path / "dataset")
-    settings = eval_settings.model_copy(update={"eval_dir": str(tmp_path), "google_api_key": None})
+    settings = eval_settings.model_copy(update={"eval_dir": str(tmp_path)})
     jobs = EvalJobs(settings, lambda: embeddings, transport=eval_shop)
     api.app.dependency_overrides[get_eval_jobs] = lambda: jobs
     yield jobs

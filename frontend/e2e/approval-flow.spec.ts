@@ -6,7 +6,7 @@ import { devices, expect, type Page, test } from "@playwright/test";
  * the refund without reloading. Needs the stack running and fresh mock data (`make e2e`).
  */
 
-type Person = "customer" | "supervisor";
+type Person = "customer" | "agent" | "supervisor";
 
 function password(who: Person): string {
   const value = process.env[`SEED_${who.toUpperCase()}_PASSWORD`];
@@ -28,10 +28,12 @@ async function expectAtMostOnePrimaryButton(page: Page): Promise<void> {
 
 /** Wait for the chat to load, then leave any earlier ticket for a fresh one. */
 async function startNewRequest(page: Page): Promise<void> {
-  await expect(page.getByLabel("Message")).toBeVisible();
-  const newRequest = page.getByRole("button", { name: "New request" });
+  const newRequest = page.getByRole("button", { name: "New request", exact: true });
+  const fresh = page.getByText("How can we help today?");
+  await expect(newRequest.or(fresh)).toBeVisible();
   if (await newRequest.isVisible()) await newRequest.click();
-  await expect(page.getByText("How can we help today?")).toBeVisible();
+  await expect(fresh).toBeVisible();
+  await expect(page.getByLabel("Message")).toBeFocused();
 }
 
 test("a supervisor approves a refund and the customer's chat updates live", async ({ browser }) => {
@@ -92,11 +94,62 @@ test("a supervisor approves a refund and the customer's chat updates live", asyn
   await expectAtMostOnePrimaryButton(supervisor);
 });
 
+test("staff take over an escalated ticket and the customer sees it live", async ({ browser }) => {
+  const customer = await (await browser.newContext()).newPage();
+  const staff = await (await browser.newContext()).newPage();
+
+  await signIn(customer, "customer");
+  await startNewRequest(customer);
+  const box = customer.getByLabel("Message");
+  await box.fill("I'd like a refund for the Nimbus laptop, the screen flickers.");
+  await box.press("Enter");
+  // $1,299 is over the supervisor limit, so the agent hands it to a specialist.
+  await expect(customer.getByTestId("latest-status")).toHaveText("With a specialist", {
+    timeout: 60_000,
+  });
+  await expect(customer.getByText("A specialist is handling this request and will reply here.")).toBeVisible();
+  const header = await customer.getByText(/Replies in seconds · TCK-\d+/).textContent();
+  const ticketNumber = header?.match(/TCK-\d+/)?.[0];
+  expect(ticketNumber).toBeTruthy();
+
+  await signIn(staff, "agent");
+  await expect(staff).toHaveURL(/\/console/);
+  await staff.getByRole("button", { name: "With a specialist" }).click();
+  await staff.getByRole("link", { name: new RegExp(ticketNumber!) }).click();
+  const panel = staff.getByRole("region", { name: "Handle this ticket" });
+
+  await panel.getByLabel("Message the customer").fill("Thanks, we're looking at the screen issue now.");
+  await panel.getByRole("button", { name: "Send reply" }).click();
+  await expect(customer.getByText("Thanks, we're looking at the screen issue now.")).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(customer.getByText("Support team")).toBeVisible();
+
+  await expect(panel.getByText(/Override needed\./)).toBeVisible();
+  const act = panel.getByRole("button", { name: "Override and refund $1,299.00" });
+  await expect(act).toBeDisabled();
+  await panel.getByLabel(/Reason for the override/).fill("Screen defect confirmed; goodwill refund");
+  await expectAtMostOnePrimaryButton(staff);
+  await act.dblclick(); // an impatient specialist
+  await expect(panel.getByRole("status")).toContainText("Refunded $1,299.00");
+
+  await expect(customer.getByText(/I've refunded \$1299\.00 to your card ending 8811/)).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(customer.getByTestId("latest-status")).toHaveText("Resolved");
+  const mockUrl = process.env.E2E_MOCK_URL;
+  if (mockUrl) {
+    const order = await (await fetch(`${mockUrl}/orders/ORD-10006`)).json();
+    expect(order.refunded_amount).toBe("1299.00");
+  }
+});
+
 test("the customer chat fits a phone screen", async ({ browser }) => {
   const { defaultBrowserType: _ignored, ...phone } = devices["iPhone 13"];
   const page = await (await browser.newContext(phone)).newPage();
   await signIn(page, "customer");
   await expect(page).toHaveURL(/\/chat$/);
+  await startNewRequest(page);
 
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - window.innerWidth,

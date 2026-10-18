@@ -10,7 +10,15 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useEvalOverview, useEvalReport, useStartEval } from "@/hooks/useEvals";
 import { ApiError } from "@/lib/api";
-import { categoryName, categoryRows, estimateFor, exactUsd, seconds, truncatedPercent } from "@/lib/evals";
+import {
+  categoryName,
+  categoryRows,
+  estimateFor,
+  exactUsd,
+  seconds,
+  temperatureLabel,
+  truncatedPercent,
+} from "@/lib/evals";
 import { dateTime } from "@/lib/format";
 import type { EvalJob, EvalLlm, EvalOverview, EvalReport, EvalRunSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -126,7 +134,7 @@ function JobStatus({ job }: { job: EvalJob }) {
 function RunHeader({ summary }: { summary: EvalRunSummary }) {
   const m = summary.metrics;
   const facts = [
-    `${modelLabel(summary)}, temperature ${summary.temperature}`,
+    `${modelLabel(summary)}, ${temperatureLabel(summary)}`,
     `${dateTime(summary.started_at)}`,
     `commit ${summary.git_commit}`,
     `dataset ${summary.dataset.sha256.slice(0, 8)}`,

@@ -25,6 +25,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      # The containers run as a non-root user (uid 10001). On Linux, folders mounted from the
+      # checkout keep the runner's ownership, so that user could not write caches or reports.
+      - name: Let the containers' app user write to the checkout
+        run: sudo chown -R 10001:10001 backend mock_commerce evals docs
       - name: Create a CI .env with throwaway secrets
         run: .github/scripts/ci-env.sh
       - name: Build images
@@ -67,6 +71,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      # The containers run as a non-root user (uid 10001). On Linux, folders mounted from the
+      # checkout keep the runner's ownership, so that user could not write caches or reports.
+      - name: Let the containers' app user write to the checkout
+        run: sudo chown -R 10001:10001 backend mock_commerce evals docs
       - name: Create a CI .env with throwaway secrets
         run: .github/scripts/ci-env.sh
       - name: Build images
